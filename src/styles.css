@@ -1124,3 +1124,40 @@ body,
 .login-screen button:disabled {
   opacity: .72;
 }
+
+/* =========================
+   ERP V30.16 FAST DATA + SCROLL FIX
+   ========================= */
+html, body, #root, .app-shell {
+  overscroll-behavior-y: auto !important;
+  touch-action: manipulation !important;
+}
+.modal-overlay {
+  touch-action: auto !important;
+  overscroll-behavior: auto !important;
+}
+.modal-panel {
+  touch-action: auto !important;
+  overscroll-behavior: contain !important;
+}
+.pick-list-lite {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
+  max-height: none !important;
+}
+.table-scroll {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-x pan-y !important;
+}
+.summary-table {
+  min-width: 760px !important;
+}
+.savebar-lite {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+}

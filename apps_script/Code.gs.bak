@@ -711,7 +711,7 @@ function getLichSuNhapLieu(ngay, boPhan){
   const out = [];
   for (let i=1;i<data.length;i++){
     if (normDate_(data[i][2]) !== ngay) continue;
-    if (!sameBp_(data[i][4], boPhan)) continue;
+    if (txt_(data[i][4]) !== boPhan) continue;
     out.push({
       ngay: normDate_(data[i][2]),
       boPhanBaoCao: txt_(data[i][4]),
@@ -861,33 +861,7 @@ function getNhapLieuBundleV309(ngay, boPhan, loaiBaoCao, chiTiet){
   const loai = txt_(loaiBaoCao);
   const ct = txt_(chiTiet);
   const items = getChiTietNhapLieu(n, bp, loai, ct);
-  const savedAny = items.some(function(x){ return x && x.selected === true; });
-  return {ok:true, ngay: n, boPhan: bp, loaiBaoCao: loai, chiTiet: ct, items: items, hasSavedBefore: hasEntrySavedV312_(n, bp, loai, ct) || savedAny, cache: getClientCache(bp)};
-}
-
-
-function getTodayBootstrapV315(boPhan, ngay){
-  const n = normDate_(ngay || new Date());
-  const bp = txt_(boPhan);
-  const loaiTangCa = LOAI.TANG_CA;
-  const loaiBienDong = LOAI.BIEN_DONG;
-  const loaiVang = LOAI.VANG;
-  const tangCaList = ['Tăng ca sáng','Tăng ca trưa','Tăng ca chiều','Tăng ca đột xuất'];
-  const bienDongList = ['Công nhân mới','Nghỉ việc','Xin về sớm','Điều động sang tổ khác'];
-  const vangList = ['Vắng buổi sáng','Vắng buổi chiều','Vắng cả ngày'];
-  const cache = getClientCache(bp);
-  const counts = {};
-  counts[loaiTangCa] = getCountsByLoai(n, bp, loaiTangCa);
-  counts[loaiBienDong] = getCountsByLoai(n, bp, loaiBienDong);
-  counts[loaiVang] = getCountsByLoai(n, bp, loaiVang);
-  const bundles = {};
-  bundles[loaiTangCa] = {};
-  bundles[loaiBienDong] = {};
-  bundles[loaiVang] = {};
-  tangCaList.forEach(function(ct){ bundles[loaiTangCa][ct] = getNhapLieuBundleV309(n, bp, loaiTangCa, ct); });
-  bienDongList.forEach(function(ct){ bundles[loaiBienDong][ct] = getNhapLieuBundleV309(n, bp, loaiBienDong, ct); });
-  vangList.forEach(function(ct){ bundles[loaiVang][ct] = getNhapLieuBundleV309(n, bp, loaiVang, ct); });
-  return {ok:true, ngay:n, boPhan:bp, cache:cache, counts:counts, bundles:bundles, loadedAt:fmtTime_(new Date())};
+  return {ok:true, ngay: n, boPhan: bp, loaiBaoCao: loai, chiTiet: ct, items: items, hasSavedBefore: hasEntrySavedV312_(n, bp, loai, ct) || items.length > 0, cache: getClientCache(bp)};
 }
 
 /* ================= V23.5 FAST LOGIN INIT =================
@@ -1102,105 +1076,4 @@ function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('Index')
     .setTitle('Báo cáo nhân sự')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-/* ================= V30.16 FAST BOOTSTRAP OVERRIDE =================
- * Tải dữ liệu hôm nay bằng 1 lần đọc sheet chi tiết + 1 lần đọc nhân sự.
- * Không gọi getNhapLieuBundleV309 lặp lại 11 lần vì hàm đó tự đọc cache nhân sự nhiều lần.
-=================================================================== */
-function buildBundleFastV316_(n, bp, loai, ct, grouped, cache){
-  const key = loai + '||' + ct;
-  const saved = grouped[key] || [];
-  const hasSavedBefore = hasEntrySavedV312_(n, bp, loai, ct) || saved.length > 0;
-  return {ok:true, ngay:n, boPhan:bp, loaiBaoCao:loai, chiTiet:ct, items:saved, hasSavedBefore:hasSavedBefore, cache:cache};
-}
-
-function getTodayBootstrapV316(boPhan, ngay){
-  const n = normDate_(ngay || new Date());
-  const bp = txt_(boPhan);
-  const loaiTangCa = LOAI.TANG_CA;
-  const loaiBienDong = LOAI.BIEN_DONG;
-  const loaiVang = LOAI.VANG;
-  const tangCaList = ['Tăng ca sáng','Tăng ca trưa','Tăng ca chiều','Tăng ca đột xuất'];
-  const bienDongList = ['Công nhân mới','Nghỉ việc','Xin về sớm','Điều động sang tổ khác'];
-  const vangList = ['Vắng buổi sáng','Vắng buổi chiều','Vắng cả ngày'];
-  const cache = getClientCache(bp);
-  const data = sh_(SHEET.CT).getDataRange().getDisplayValues();
-  const grouped = {};
-  const counts = {};
-  counts[loaiTangCa] = {'Tăng ca sáng':0,'Tăng ca trưa':0,'Tăng ca chiều':0,'Tăng ca đột xuất':0};
-  counts[loaiBienDong] = {'Công nhân mới':0,'Nghỉ việc':0,'Xin về sớm':0,'Điều động sang tổ khác':0};
-  counts[loaiVang] = {'Vắng buổi sáng':0,'Vắng buổi chiều':0,'Vắng cả ngày':0};
-
-  for (let i=1;i<data.length;i++){
-    if (normDate_(data[i][2]) !== n) continue;
-    if (!sameBp_(data[i][4], bp)) continue;
-    const loai = txt_(data[i][5]);
-    const ct = txt_(data[i][6]);
-    const key = loai + '||' + ct;
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push({
-      maChiTiet:txt_(data[i][0]), maNv:txt_(data[i][7]), tenNv:txt_(data[i][8]), boPhanGoc:txt_(data[i][9]),
-      trangThai:txt_(data[i][10]), batDau:txt_(data[i][11]), ketThuc:txt_(data[i][12]), soGio:txt_(data[i][13]),
-      toChuyenDen:txt_(data[i][14]), lyDo:txt_(data[i][15]), nguon:txt_(data[i][16]), ghiChu:txt_(data[i][17]), selected:true
-    });
-    if (!counts[loai]) counts[loai] = {};
-    counts[loai][ct] = (counts[loai][ct] || 0) + 1;
-  }
-
-  const bundles = {};
-  bundles[loaiTangCa] = {};
-  bundles[loaiBienDong] = {};
-  bundles[loaiVang] = {};
-  tangCaList.forEach(function(ct){ bundles[loaiTangCa][ct] = buildBundleFastV316_(n, bp, loaiTangCa, ct, grouped, cache); });
-  bienDongList.forEach(function(ct){ bundles[loaiBienDong][ct] = buildBundleFastV316_(n, bp, loaiBienDong, ct, grouped, cache); });
-  vangList.forEach(function(ct){ bundles[loaiVang][ct] = buildBundleFastV316_(n, bp, loaiVang, ct, grouped, cache); });
-  return {ok:true, ngay:n, boPhan:bp, cache:cache, counts:counts, bundles:bundles, loadedAt:fmtTime_(new Date()), fast:true};
-}
-
-/* Override API maps to expose V30.16 */
-function apiMapV304_() {
-  return {
-    appInit: appInit,
-    getLoginInitFast: getLoginInitFast,
-    getDanhSachBoPhan: getDanhSachBoPhan,
-    loginBoPhan: loginBoPhan,
-    getDanhSachToTruong: getDanhSachToTruong,
-    searchNhanSu: searchNhanSu,
-    getThongTinNhanSu: getThongTinNhanSu,
-    getBaoCaoTong: getBaoCaoTong,
-    saveBaoCaoTong: saveBaoCaoTong,
-    getChiTietVang: getChiTietVang,
-    getChiTietNhapLieu: getChiTietNhapLieu,
-    saveChiTietVang: saveChiTietVang,
-    saveNhapLieu: saveNhapLieu,
-    getTongQuanNhapLieu: getTongQuanNhapLieu,
-    getBaoCaoTongCongTy: getBaoCaoTongCongTy,
-    getDanhSachTangCaXemTruoc: getDanhSachTangCaXemTruoc,
-    exportTangCaExcelShare: exportTangCaExcelShare,
-    getDanhSachCongViec: getDanhSachCongViec,
-    saveCongViec: saveCongViec,
-    getLichSuNhapLieu: getLichSuNhapLieu,
-    getNhanSuTheoBoPhan: getNhanSuTheoBoPhan,
-    getCountsByLoai: getCountsByLoai,
-    doiMatKhau: doiMatKhau,
-    getBangTangCaThang: getBangTangCaThang,
-    getClientCache: getClientCache,
-    getNhapLieuBundleV309: getNhapLieuBundleV309,
-    getTodayBootstrapV315: getTodayBootstrapV315,
-    getTodayBootstrapV316: getTodayBootstrapV316,
-    appSetup: appSetup,
-    installDailyCleanupTrigger: installDailyCleanupTrigger,
-    cleanupOldData: cleanupOldData
-  };
-}
-
-function doPost(e) {
-  try {
-    const body = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
-    const req = JSON.parse(body);
-    return handleApiV304_(String(req.action || '').trim(), Array.isArray(req.args) ? req.args : [], req.apiKey, null);
-  } catch (err) {
-    return jsonV23_({ ok:false, error: err && err.message ? err.message : String(err) });
-  }
 }
