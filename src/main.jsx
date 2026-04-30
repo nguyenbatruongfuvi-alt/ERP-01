@@ -518,7 +518,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     return () => clearTimeout(timer)
   }, [kw, session.boPhan])
 
-  function defaultStatus() { return type === 'Biến động' ? 'Tăng' : 'Có phép' }
+  function defaultStatus() { return type === 'Vắng mặt' ? 'Có phép' : 'Đã chọn' }
   function toggle(ma) { setRows(list => sortPickRows(list.map(x => x.maNv === ma ? { ...x, selected: !x.selected, trangThai: x.trangThai || defaultStatus() } : x), session.boPhan)) }
   function setStatus(ma, value) { setRows(list => list.map(x => x.maNv === ma ? { ...x, trangThai: value } : x)) }
   function addExternal(p) {
@@ -541,7 +541,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       maNv: x.maNv,
       tenNv: x.tenNv,
       boPhanGoc: x.boPhanGoc || x.boPhan || session.boPhan,
-      trangThai: type === 'Vắng mặt' ? (x.trangThai === 'Không phép' ? 'Không phép' : 'Có phép') : type === 'Biến động' ? (x.trangThai === 'Giảm' ? 'Giảm' : 'Tăng') : 'Đã chọn',
+      trangThai: type === 'Vắng mặt' ? (x.trangThai === 'Không phép' ? 'Không phép' : 'Có phép') : 'Đã chọn',
     }))
     const requestId = `nl_${Date.now()}_${Math.random().toString(16).slice(2)}`
     const payload = { requestId, localDraftAt: Date.now(), ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, chiTiet: title, items, batDau, ketThuc, soGio, loaiBaoCao, ghiChu: '' }
@@ -566,7 +566,6 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   const actionControls = (p) => <div className="row-actions-lite" onClick={e => e.stopPropagation()}>
     <button className={p.selected ? 'secondary-button mini selected-mini' : 'primary-button mini'} onClick={() => toggle(p.maNv)}>{p.selected ? 'Đã chọn' : 'Chọn'}</button>
     {type === 'Vắng mặt' && <select className="mini status-mini" value={p.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => setStatus(p.maNv, e.target.value)}><option>Có phép</option><option>Không phép</option></select>}
-    {type === 'Biến động' && <select className="mini status-mini" value={p.trangThai === 'Giảm' ? 'Giảm' : 'Tăng'} onChange={e => setStatus(p.maNv, e.target.value)}><option>Tăng</option><option>Giảm</option></select>}
   </div>
 
   return <div className="modal-overlay"><div className="modal-panel"><div className="modal-head-lite"><b>{title}</b><button onClick={onClose}>×</button></div>
@@ -588,7 +587,6 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
           <div className="row-actions-lite">
             <button className={current.selected ? 'secondary-button mini selected-mini' : 'primary-button mini'} onClick={() => current.selected ? toggle(p.maNv) : addExternal(p)}>{current.selected ? 'Đã chọn' : 'Chọn'}</button>
             {type === 'Vắng mặt' && <select className="mini status-mini" value={current.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => { current.selected ? setStatus(p.maNv, e.target.value) : addExternal({ ...p, trangThai: e.target.value }) }}><option>Có phép</option><option>Không phép</option></select>}
-            {type === 'Biến động' && <select className="mini status-mini" value={current.trangThai === 'Giảm' ? 'Giảm' : 'Tăng'} onChange={e => { current.selected ? setStatus(p.maNv, e.target.value) : addExternal({ ...p, trangThai: e.target.value }) }}><option>Tăng</option><option>Giảm</option></select>}
           </div>
         </div>
       }) : <div className="note-compact">Không thấy nhân viên phù hợp.</div>}</div>}
