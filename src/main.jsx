@@ -428,6 +428,7 @@ function sortPickRows(list, dept) {
 }
 
 function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
+  const isTransfer = title === 'Điều động sang tổ khác'
   const [rows, setRows] = useState([])
   const [msg, setMsg] = useState('')
   const [batDau, setBatDau] = useState('')
@@ -437,6 +438,9 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [kw, setKw] = useState('')
   const [remoteResults, setRemoteResults] = useState([])
+  const [inTeamOpen, setInTeamOpen] = useState(true)
+  const [outsideOpen, setOutsideOpen] = useState(true)
+  const [transferTarget, setTransferTarget] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -472,6 +476,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
           setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })), session.boPhan))
           setBatDau(localDraft.batDau || '')
           setKetThuc(localDraft.ketThuc || '')
+          setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
           setMsg(e.offline ? 'Đang offline thật: dùng dữ liệu tạm trên máy.' : 'API lỗi: đang dùng dữ liệu tạm trên máy.')
         } else if (!preBundle) {
           setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })), session.boPhan))
@@ -482,17 +487,25 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     return () => { alive = false }
   }, [title, type, session.boPhan, cache])
 
-  const selectedCount = rows.filter(x => x.selected).length
-  const inTeamCount = rows.filter(x => x.selected && sameDeptRow(x, session.boPhan) && !x.outside).length
-  const outsideCount = rows.filter(x => x.selected && (x.outside || !sameDeptRow(x, session.boPhan))).length
+  const selectedRows = rows.filter(x => x.selected)
+  const selectedCount = selectedRows.length
+  const inTeamRows = rows.filter(x => sameDeptRow(x, session.boPhan) && !x.outside)
+  const outsideRows = rows.filter(x => x.outside || !sameDeptRow(x, session.boPhan))
+  const inTeamCount = selectedRows.filter(x => sameDeptRow(x, session.boPhan) && !x.outside).length
+  const outsideCount = selectedRows.filter(x => x.outside || !sameDeptRow(x, session.boPhan)).length
   const totalHours = type === 'Tăng ca' ? (Number(soGio || 0) * selectedCount).toFixed(2) : ''
   const allStaff = useMemo(() => {
     const pre = getPreloadedToday(session.boPhan)
     const list = cache?.nhanSuAll || pre?.cache?.nhanSuAll || cache?.today?.cache?.nhanSuAll || []
     const map = new Map()
-    ;[...list, ...rows].forEach(x => { const p = normalizeRow(x); if (p.maNv) map.set(p.maNv, p) })
+    ;[...list, ...rows, ...staff].forEach(x => { const p = normalizeRow(x); if (p.maNv) map.set(p.maNv, p) })
     return Array.from(map.values())
-  }, [cache, rows, session.boPhan])
+  }, [cache, rows, staff, session.boPhan])
+  const departmentOptions = useMemo(() => {
+    const set = new Set([...(cache?.boPhanList || []), ...fallbackDepartments])
+    allStaff.forEach(p => { const bp = p.boPhanGoc || p.boPhan; if (bp) set.add(bp) })
+    return Array.from(set).filter(x => stripVietnamese(x) !== stripVietnamese(session.boPhan))
+  }, [allStaff, cache, session.boPhan])
   const searchResults = useMemo(() => {
     const q = stripVietnamese(kw)
     if (!q) return []
@@ -536,20 +549,27 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       setMsg('Vui lòng chọn giờ bắt đầu và giờ kết thúc.')
       return
     }
+    if (isTransfer && !transferTarget.trim()) {
+      setMsg('Vui lòng chọn tổ chuyển đến trước khi lưu.')
+      return
+    }
     const loaiBaoCao = type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type
-    const items = rows.filter(x => x.selected).map(x => ({
+    const items = selectedRows.map(x => ({
       maNv: x.maNv,
       tenNv: x.tenNv,
       boPhanGoc: x.boPhanGoc || x.boPhan || session.boPhan,
-      trangThai: type === 'Vắng mặt' ? (x.trangThai === 'Không phép' ? 'Không phép' : 'Có phép') : 'Đã chọn',
+      trangThai: type === 'Vắng mặt' ? (x.trangThai === 'Không phép' ? 'Không phép' : 'Có phép') : (isTransfer ? `Điều động sang ${transferTarget.trim()} (hỗ trợ)` : 'Đã chọn'),
+      boPhanChuyenDen: isTransfer ? transferTarget.trim() : '',
+      toChuyenDen: isTransfer ? transferTarget.trim() : '',
+      hoTro: isTransfer ? true : false,
     }))
     const requestId = `nl_${Date.now()}_${Math.random().toString(16).slice(2)}`
-    const payload = { requestId, localDraftAt: Date.now(), ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, chiTiet: title, items, batDau, ketThuc, soGio, loaiBaoCao, ghiChu: '' }
+    const payload = { requestId, localDraftAt: Date.now(), ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, chiTiet: title, items, batDau, ketThuc, soGio, loaiBaoCao, boPhanChuyenDen: isTransfer ? transferTarget.trim() : '', toChuyenDen: isTransfer ? transferTarget.trim() : '', ghiChu: isTransfer ? `Điều động sang ${transferTarget.trim()} - hiển thị tại tổ nhận là (hỗ trợ)` : '' }
     writeJson(draftKeyFor(session, type, title), payload)
     setSaving(true); setMsg('⏳ Đang lưu dữ liệu...')
     try {
       const r = await api(type === 'Vắng mặt' ? 'saveChiTietVang' : 'saveNhapLieu', [payload])
-      setMsg(`✅ ĐÃ LƯU THÀNH CÔNG ${items.length} người${r?.savedAt ? ' lúc ' + r.savedAt : ''}`)
+      setMsg(`✅ ĐÃ LƯU THÀNH CÔNG ${items.length} người${isTransfer ? ` sang ${transferTarget.trim()} (hỗ trợ)` : ''}${r?.savedAt ? ' lúc ' + r.savedAt : ''}`)
       clearJson(draftKeyFor(session, type, title))
       onSaved?.()
     } catch (e) {
@@ -567,32 +587,38 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     <button className={p.selected ? 'secondary-button mini selected-mini' : 'primary-button mini'} onClick={() => toggle(p.maNv)}>{p.selected ? 'Đã chọn' : 'Chọn'}</button>
     {type === 'Vắng mặt' && <select className="mini status-mini" value={p.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => setStatus(p.maNv, e.target.value)}><option>Có phép</option><option>Không phép</option></select>}
   </div>
+  const renderPerson = (p, prefix = '') => <div className={`pick-row-lite ${p.selected ? 'selected' : ''} ${(p.outside || !sameDeptRow(p, session.boPhan)) ? 'outside' : ''}`} key={`${prefix}${p.maNv}`} onClick={() => toggle(p.maNv)}>
+    <div className="person-info-lite"><b>{p.tenNv}{(p.outside || !sameDeptRow(p, session.boPhan)) && !isTransfer ? ' (hỗ trợ)' : ''}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}{(p.outside || !sameDeptRow(p, session.boPhan)) ? ' · ngoài tổ' : ''}{type === 'Tăng ca' && <> · Giờ TC: {batDau || '--:--'} → {ketThuc || '--:--'} = {soGio || '0'} giờ</>}</div></div>{actionControls(p)}</div>
 
-  return <div className="modal-overlay"><div className="modal-panel"><div className="modal-head-lite"><b>{title}</b><button onClick={onClose}>×</button></div>
-    {type === 'Tăng ca' && <div className="overtime-compact-grid">
-      <div><label className="field-label overtime-label">Bắt đầu</label><select className="form-control form-control-sm time-select-control" value={batDau} onChange={e => setBatDau(e.target.value)}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
-      <div><label className="field-label overtime-label">Kết thúc</label><select className="form-control form-control-sm time-select-control" value={ketThuc} onChange={e => setKetThuc(e.target.value)}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
-      <div><label className="field-label overtime-label">Số giờ</label><input className="form-control form-control-sm overtime-hours-input" value={soGio} readOnly /></div>
-    </div>}
-    <div className="note-compact">✅ Đã chọn: <b>{selectedCount}</b> nhân viên <span className="note-mini">Trong tổ: {inTeamCount} · Ngoài tổ: {outsideCount}{type === 'Tăng ca' ? ` · Tổng TG: ${totalHours} giờ` : ''}</span></div>
-    {loading && <div className="note-compact">Đang tải dữ liệu...</div>}
+  return <div className="modal-overlay"><div className="modal-panel modal-v23"><div className="modal-head-lite modal-head-green"><button className="modal-back" onClick={onClose}>←</button><b>{title}</b><button className="modal-close" onClick={onClose}>×</button></div>
+    <div className="modal-fixed-top">
+      {type === 'Tăng ca' && <div className="overtime-compact-grid">
+        <div><label className="field-label overtime-label">Bắt đầu</label><select className="form-control form-control-sm time-select-control" value={batDau} onChange={e => setBatDau(e.target.value)}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
+        <div><label className="field-label overtime-label">Kết thúc</label><select className="form-control form-control-sm time-select-control" value={ketThuc} onChange={e => setKetThuc(e.target.value)}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
+        <div><label className="field-label overtime-label">Số giờ</label><input className="form-control form-control-sm overtime-hours-input" value={soGio} readOnly /></div>
+      </div>}
+      {isTransfer && <div className="transfer-target-box"><label className="field-label">Tổ chuyển đến</label><select className="form-control form-control-sm" value={transferTarget} onChange={e => setTransferTarget(e.target.value)}><option value="">Chọn tổ chuyển đến</option>{departmentOptions.map(bp => <option key={bp} value={bp}>{bp}</option>)}</select></div>}
+      <div className="note-compact summary-v23"><div>✅ Đã chọn: <b>{selectedCount}</b> nhân viên</div><span>Trong tổ: {inTeamCount} · Ngoài tổ: {outsideCount}{type === 'Tăng ca' ? ` · Tổng TG: ${totalHours} giờ` : ''}</span>{isTransfer && transferTarget && <span>Chuyển đến: <b>{transferTarget}</b> · sang tổ nhận sẽ hiện <b>(hỗ trợ)</b></span>}</div>
+      {loading && <div className="note-compact loading-v23">Đang tải dữ liệu...</div>}
+      <div className="pick-section-row" onClick={() => setInTeamOpen(v => !v)}><div><b>1. Chọn nhân viên trong tổ</b> <span>({session.boPhan})</span></div><div className="section-right"><em>{inTeamRows.length}</em><i>{inTeamOpen ? '⌄' : '›'}</i></div></div>
+      <div className="pick-section-row" onClick={() => setOutsideOpen(v => !v)}><div><b>2. Thêm nhân viên từ bộ phận khác</b></div><div className="section-right"><em>{outsideCount}</em><i>{outsideOpen ? '⌃' : '›'}</i></div></div>
+      {outsideOpen && <div className="external-search-box"><span className="search-ico">⌕</span><input value={kw} onChange={e => setKw(e.target.value)} placeholder="Nhập tên, mã số (có dấu hoặc không dấu)..." />{kw && <button onClick={() => setKw('')}>×</button>}</div>}
+    </div>
     <div className="pick-scroll-area">
-      <div className="pick-section-row"><b>1. Chọn nhân viên trong tổ</b><span>{session.boPhan}</span><em>{rows.filter(x => sameDeptRow(x, session.boPhan) && !x.outside).length}</em></div>
-      <div className="pick-section-row"><b>2. Thêm nhân viên từ bộ phận khác</b><em>{outsideCount}</em></div>
-      <div className="external-search-box"><span className="search-ico">⌕</span><input value={kw} onChange={e => setKw(e.target.value)} placeholder="Nhập tên, mã số (có dấu hoặc không dấu)..." />{kw && <button onClick={() => setKw('')}>×</button>}</div>
-      {kw && <div className="external-results">{searchResults.length ? searchResults.map(p => {
+      {kw && outsideOpen && <div className="external-results">{searchResults.length ? searchResults.map(p => {
         const current = rows.find(x => x.maNv === p.maNv) || p
         return <div className={`pick-row-lite external ${current.selected ? 'selected' : ''}`} key={`sr_${p.maNv}`}>
-          <div><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}</div></div>
+          <div className="person-info-lite"><b>{p.tenNv} (hỗ trợ)</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}</div></div>
           <div className="row-actions-lite">
             <button className={current.selected ? 'secondary-button mini selected-mini' : 'primary-button mini'} onClick={() => current.selected ? toggle(p.maNv) : addExternal(p)}>{current.selected ? 'Đã chọn' : 'Chọn'}</button>
             {type === 'Vắng mặt' && <select className="mini status-mini" value={current.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => { current.selected ? setStatus(p.maNv, e.target.value) : addExternal({ ...p, trangThai: e.target.value }) }}><option>Có phép</option><option>Không phép</option></select>}
           </div>
         </div>
       }) : <div className="note-compact">Không thấy nhân viên phù hợp.</div>}</div>}
-      <div className="pick-list-lite">{rows.map(p => <div className={`pick-row-lite ${p.selected ? 'selected' : ''} ${(p.outside || !sameDeptRow(p, session.boPhan)) ? 'outside' : ''}`} key={p.maNv} onClick={() => toggle(p.maNv)}><div><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}{(p.outside || !sameDeptRow(p, session.boPhan)) ? ' · ngoài tổ' : ''}{type === 'Tăng ca' && <> · Giờ TC: {batDau || '--:--'} → {ketThuc || '--:--'} = {soGio || '0'} giờ</>}</div></div>{actionControls(p)}</div>)}</div>
+      {inTeamOpen && <div className="pick-list-lite main-list-v23">{inTeamRows.map(p => renderPerson(p, 'in_'))}</div>}
+      {outsideOpen && outsideRows.length > 0 && <div className="pick-list-lite outside-list-v23">{outsideRows.map(p => renderPerson(p, 'out_'))}</div>}
     </div>
-    <div className="savebar-lite"><button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : '💾 Lưu / Cập nhật'}</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('lỗi') && !msg.includes('Lỗi') && !msg.includes('CHƯA LƯU')} /></div></div></div>
+    <div className="savebar-lite"><button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : `Lưu (${selectedCount} nhân viên)`}</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('lỗi') && !msg.includes('Lỗi') && !msg.includes('CHƯA LƯU')} /></div></div></div>
 }
 
 function StaffScreen({ session, cache }) { const staff = useStaff(session, cache); return <div className="card"><div className="table-scroll"><table className="summary-table staff-table"><thead><tr><th>Mã NV</th><th>Tên NV</th><th>Bộ phận</th><th>Trạng thái</th></tr></thead><tbody>{staff.map(row => <tr key={row.maNv}><td>{row.maNv}</td><td>{row.tenNv}</td><td>{row.boPhan}</td><td>{row.trangThai}</td></tr>)}</tbody></table></div></div> }
