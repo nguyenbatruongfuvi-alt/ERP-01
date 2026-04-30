@@ -1210,6 +1210,11 @@ function getTodayBootstrapV317(boPhan, ngay) {
   return getTodayBootstrapV316(boPhan, ngay);
 }
 
+/* V30.18 alias: frontend cache điện thoại dùng chung lõi fast bootstrap V30.16 */
+function getTodayBootstrapV318(boPhan, ngay) {
+  return getTodayBootstrapV316(boPhan, ngay);
+}
+
 /* Override API maps to expose V30.17 */
 function apiMapV304_() {
   return {
@@ -1242,6 +1247,7 @@ function apiMapV304_() {
     getTodayBootstrapV315: getTodayBootstrapV315,
     getTodayBootstrapV316: getTodayBootstrapV316,
     getTodayBootstrapV317: getTodayBootstrapV317,
+    getTodayBootstrapV318: getTodayBootstrapV318,
     appSetup: appSetup,
     installDailyCleanupTrigger: installDailyCleanupTrigger,
     cleanupOldData: cleanupOldData
