@@ -1,0 +1,1126 @@
+:root {
+  /* Brand */
+  --color-primary: #0b7a3d;
+  --color-primary-dark: #066333;
+  --color-bg: #f3f6fa;
+  --color-surface: #ffffff;
+  --color-text: #101828;
+  --color-muted: #667085;
+  --color-border: #e5e7eb;
+  --color-soft-green: #ecfdf3;
+  --color-warning-bg: #fff7e6;
+  --color-warning-border: #ffd28a;
+  --color-warning-text: #b42318;
+
+  /* Semantic */
+  --color-blue: #1570ef;
+  --color-green: #027a48;
+  --color-orange: #f79009;
+  --color-red: #d92d20;
+
+  /* Typography - locked mobile scale */
+  --fs-header: 18px;
+  --fs-section: 15px;
+  --fs-menu: 20px;
+  --fs-body: 16px;
+  --fs-card-title: 16px;
+  --fs-card-sub: 13px;
+  --fs-caption: 13px;
+  --fs-number: 20px;
+
+  /* Spacing */
+  --space-page: 12px;
+  --space-card: 12px;
+  --space-gap: 10px;
+
+  /* Radius & shadow */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 16px;
+  --shadow-card: 0 8px 22px rgba(16, 24, 40, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: Arial, Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  min-height: 100vh;
+  max-width: 480px;
+  margin: 0 auto;
+  background: var(--color-bg);
+}
+
+/* LOGIN */
+.login-screen {
+  min-height: 100vh;
+  background: var(--color-surface);
+  padding: 26px 14px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 16px;
+  color: var(--color-primary);
+  font-size: 23px;
+  line-height: 1.12;
+  font-weight: 900;
+}
+
+.login-brand-icon {
+  font-size: 31px;
+}
+
+.login-title {
+  margin: 8px 0 20px;
+  font-size: 30px;
+  line-height: 1.12;
+  font-weight: 900;
+  letter-spacing: -0.2px;
+}
+
+.form-label {
+  display: block;
+  margin: 15px 0 7px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.form-control {
+  width: 100%;
+  height: 50px;
+  border: 1px solid #d0d5dd;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: 0 15px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.form-control::placeholder {
+  color: #8c8c8c;
+}
+
+/* Header */
+.app-header {
+  height: 54px;
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-dark));
+  display: flex;
+  align-items: center;
+  color: white;
+  padding: 6px 9px;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.icon-button {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.16);
+  color: white;
+  font-size: 26px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.header-title {
+  flex: 1;
+  font-size: var(--fs-header);
+  font-weight: 700;
+  line-height: 1.08;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.header-user {
+  width: 92px;
+  text-align: right;
+  font-size: 11px;
+  line-height: 1.14;
+  overflow: hidden;
+}
+
+/* Home menu */
+.home-screen {
+  min-height: 100vh;
+  background: var(--color-surface);
+  padding-bottom: 18px;
+}
+
+.home-brand {
+  height: 68px;
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-dark));
+  display: flex;
+  align-items: center;
+  color: white;
+  padding: 0 16px;
+  font-size: 24px;
+  font-weight: 900;
+  gap: 10px;
+  line-height: 1.08;
+}
+
+.home-brand-icon {
+  font-size: 33px;
+}
+
+.menu-content {
+  padding: 18px 14px 0;
+}
+
+.section-title {
+  color: var(--color-muted);
+  font-size: var(--fs-section);
+  font-weight: 900;
+  margin: 14px 0 7px;
+  letter-spacing: 0.2px;
+}
+
+.menu-item {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: var(--fs-menu);
+  font-weight: 800;
+  line-height: 1.14;
+  border-radius: 11px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.menu-item:active {
+  background: #eef2f6;
+}
+
+.menu-icon {
+  width: 37px;
+  text-align: center;
+  font-size: 27px;
+  flex: 0 0 37px;
+}
+
+.retention {
+  margin: 19px 0 0;
+  background: var(--color-soft-green);
+  color: var(--color-green);
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+/* Page layout */
+.page {
+  padding: 15px var(--space-page) 28px;
+}
+
+.page-note {
+  margin: 0 0 12px;
+  color: var(--color-muted);
+  font-size: var(--fs-caption);
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-card);
+  margin-bottom: 14px;
+}
+
+.tile-card {
+  border: 1px solid #b8d9c4;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: 13px 14px;
+  margin-bottom: var(--space-gap);
+}
+
+.tile-card:last-child {
+  margin-bottom: 0;
+}
+
+.tile-title {
+  color: var(--color-primary);
+  font-size: var(--fs-card-title);
+  font-weight: 900;
+  line-height: 1.18;
+}
+
+.tile-sub {
+  color: var(--color-primary);
+  font-size: var(--fs-card-sub);
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.kpi-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-surface);
+  border: 1px solid #eaecf0;
+  border-radius: var(--radius-md);
+  padding: 11px 14px;
+  margin-bottom: 10px;
+  min-height: 64px;
+}
+
+.kpi-row:last-child {
+  margin-bottom: 0;
+}
+
+.kpi-label {
+  font-size: var(--fs-body);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.kpi-number {
+  font-size: var(--fs-number);
+  font-weight: 850;
+  min-width: 38px;
+  text-align: right;
+}
+
+.warning-card {
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-warning-text);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  padding: 13px;
+  margin-bottom: 13px;
+}
+
+.primary-button,
+.secondary-button {
+  width: 100%;
+  height: 46px;
+  border-radius: var(--radius-md);
+  font-size: 17px;
+  font-weight: 850;
+}
+
+.primary-button {
+  border: 0;
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-dark));
+  color: white;
+  box-shadow: 0 8px 18px rgba(15, 122, 67, 0.18);
+}
+
+.secondary-button {
+  border: 1px solid #b8d9c4;
+  background: white;
+  color: var(--color-primary);
+}
+
+/* Compact metadata */
+.meta-list {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.meta-line {
+  color: var(--color-muted);
+}
+
+.meta-line b {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+/* List cards for mobile */
+.person-card,
+.task-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  margin-bottom: 10px;
+  background: white;
+}
+
+.person-name,
+.task-title {
+  font-size: 16px;
+  font-weight: 850;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+/* Side menu */
+.side-menu {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 84vw;
+  max-width: 350px;
+  background: white;
+  z-index: 30;
+  transform: translateX(-105%);
+  transition: 0.18s ease;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.28);
+}
+
+.side-menu.open {
+  transform: translateX(0);
+}
+
+.backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.32);
+  z-index: 20;
+}
+
+.backdrop.show {
+  display: block;
+}
+
+.side-brand {
+  height: 66px;
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-dark));
+  color: white;
+  display: flex;
+  align-items: center;
+  padding: 0 15px;
+  font-size: 21px;
+  font-weight: 900;
+  gap: 9px;
+  line-height: 1.08;
+  overflow: hidden;
+}
+
+.side-brand-icon {
+  font-size: 28px;
+}
+
+.side-menu .menu-content {
+  padding: 17px 12px;
+}
+
+.side-menu .section-title {
+  font-size: 16px;
+  margin: 14px 0 7px;
+}
+
+.side-menu .menu-item {
+  font-size: 20px;
+  min-height: 50px;
+  padding: 4px 9px;
+}
+
+.side-menu .menu-icon {
+  font-size: 25px;
+  width: 36px;
+  flex-basis: 36px;
+}
+
+@media (min-width: 760px) {
+  .app-shell {
+    max-width: 520px;
+  }
+}
+
+
+/* =========================
+   ER30 UI STANDARD OVERRIDES
+   ========================= */
+
+/* Login: logo only outside app */
+.login-logo-slot {
+  height: 58px;
+  margin: 8px 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-placeholder {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  border: 2px solid #f6a23a;
+  color: #15803d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: 20px;
+  background: #fff;
+}
+
+.login-brand-centered {
+  justify-content: center;
+  text-align: center;
+}
+
+.login-title {
+  display: none;
+}
+
+/* App header: compact, centered, no logo inside */
+.app-header {
+  height: 56px;
+  justify-content: center;
+  padding: 5px 10px;
+}
+
+.icon-button {
+  position: absolute;
+  left: 10px;
+  width: 42px;
+  height: 42px;
+}
+
+.header-center {
+  text-align: center;
+  max-width: calc(100% - 86px);
+  line-height: 1.12;
+}
+
+.header-title {
+  font-size: 18px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.92;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Home/side header: no icon, compact */
+.home-brand {
+  justify-content: center;
+  text-align: center;
+  height: 58px;
+  font-size: 22px;
+  padding: 0 12px;
+}
+
+.side-brand {
+  justify-content: center;
+  text-align: center;
+  height: 58px;
+  font-size: 20px;
+  padding: 0 12px;
+}
+
+/* ER30 font discipline */
+.page {
+  padding-top: 14px;
+}
+
+.section-label {
+  margin: 8px 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.field-label {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.form-control-sm {
+  height: 44px !important;
+  font-size: 16px !important;
+  font-weight: 600;
+}
+
+.note-compact {
+  margin: 10px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.card h2 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 12px 0 8px;
+  text-transform: none;
+}
+
+.primary-button,
+.secondary-button {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.tile-title {
+  font-size: 16px;
+}
+
+.tile-sub {
+  font-size: 13px;
+}
+
+.kpi-label {
+  font-size: 16px;
+}
+
+.kpi-number {
+  font-size: 20px;
+}
+
+.menu-item {
+  font-size: 20px;
+}
+
+.section-title {
+  font-size: 15px;
+}
+
+/* Reduce old standalone people icons in brand areas */
+.login-brand-icon,
+.home-brand-icon,
+.side-brand-icon {
+  display: none;
+}
+
+
+/* =========================
+   ERP 30.1 FINAL FIX
+   ========================= */
+
+/* Browser/app title consistency */
+.login-logo-slot {
+  height: 118px;
+  margin: 8px 0 8px;
+}
+
+.login-logo-img {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.08));
+}
+
+.login-brand {
+  margin-top: 4px;
+  margin-bottom: 18px;
+  color: var(--color-primary);
+  font-size: 22px;
+  font-weight: 850;
+  text-transform: none;
+}
+
+.home-brand,
+.side-brand {
+  text-transform: none;
+}
+
+/* Header: centered, enough space for worker info */
+.app-header {
+  min-height: 58px;
+  height: 58px;
+}
+
+.header-center {
+  max-width: calc(100% - 72px);
+}
+
+.header-title {
+  font-size: 18px;
+  line-height: 1.05;
+}
+
+.header-sub {
+  font-size: 12px;
+  line-height: 1.15;
+  margin-top: 3px;
+}
+
+/* Company report must follow V30 summary design */
+.summary-kpi-card,
+.summary-table-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.summary-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(118px, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.summary-kpi {
+  min-height: 78px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.summary-kpi-label {
+  font-size: 13px;
+  color: var(--color-text);
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.summary-kpi-number {
+  margin-top: 8px;
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.summary-title {
+  font-size: 17px;
+  font-weight: 850;
+  margin-bottom: 10px;
+  color: var(--color-text);
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: white;
+}
+
+.summary-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.summary-table th,
+.summary-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.summary-table th {
+  background: #f3f4f6;
+  font-weight: 850;
+}
+
+.summary-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.text-green { color: var(--color-green); }
+.text-orange { color: var(--color-orange); }
+.text-red { color: var(--color-red); }
+
+/* Form sections: no numbers, no uppercase, uniform size */
+.section-label {
+  font-size: 15px !important;
+  font-weight: 750 !important;
+  color: var(--color-text) !important;
+  text-transform: none !important;
+}
+
+.card h2 {
+  font-size: 15px !important;
+  text-transform: none !important;
+}
+
+/* Mobile fit for company summary */
+@media (max-width: 520px) {
+  .summary-kpi-grid {
+    grid-template-columns: repeat(5, 112px);
+  }
+
+  .summary-kpi {
+    min-height: 74px;
+  }
+
+  .summary-kpi-label {
+    font-size: 12px;
+  }
+
+  .summary-kpi-number {
+    font-size: 26px;
+  }
+
+  .summary-title {
+    font-size: 16px;
+  }
+}
+
+/* =========================
+   ERP 30.3 Apps Script sync
+   ========================= */
+.msg{margin-top:12px;font-weight:800;font-size:14px;line-height:1.35}.ok{color:var(--color-green)}.err{color:var(--color-red)}
+.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.38);z-index:50;display:flex;align-items:flex-end}.modal-panel{width:100%;max-width:480px;margin:0 auto;background:#f8fafc;border-radius:18px 18px 0 0;max-height:92dvh;display:flex;flex-direction:column;overflow:hidden}.modal-head-lite{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;background:#fff;padding:14px 16px;border-bottom:1px solid var(--color-border);box-shadow:0 6px 14px rgba(16,24,40,.08)}.modal-head-lite b{font-size:22px;font-weight:900}.modal-head-lite button{width:42px;height:42px;border:0;border-radius:12px;background:#eef2f6;font-size:28px;font-weight:900}.pick-list-lite{overflow:auto;background:#fff;border:1px solid var(--color-border);border-radius:14px;margin:0 14px 12px}.pick-row-lite{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 12px;border-bottom:1px solid var(--color-border)}.pick-row-lite.selected{background:#ecfdf3;border-left:5px solid var(--color-primary)}.pick-row-lite:last-child{border-bottom:0}.small-text{font-size:12px;color:var(--color-muted);font-weight:700;margin-top:3px}.mini{width:auto!important;min-width:86px!important;height:38px!important;font-size:14px!important;border-radius:12px!important}.savebar-lite{background:#fff;border-top:1px solid var(--color-border);padding:12px 14px 16px}.grid2-lite{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 14px 0}.staff-table{min-width:620px}.account-info{font-size:16px;line-height:1.7}
+button:disabled{opacity:.65;cursor:not-allowed}
+@media(max-width:520px){.modal-head-lite b{font-size:20px}.pick-row-lite b{font-size:16px}.account-info{font-size:18px}.summary-table.staff-table th,.summary-table.staff-table td{font-size:16px;padding:10px}}
+
+/* =========================
+   ERP 30.5 LOGIN / HOME FIX
+   ========================= */
+.home-screen-with-header {
+  min-height: calc(100vh - 58px);
+}
+.logout-button {
+  width: 100%;
+  min-height: 48px;
+  margin: 16px 0 0;
+  border: 1px solid #ffd28a;
+  border-radius: var(--radius-md);
+  background: #fff7e6;
+  color: #b42318;
+  font-size: 16px;
+  font-weight: 850;
+}
+.logout-button:active {
+  opacity: .78;
+}
+
+/* =========================
+   ERP 30.6 LOGIN EYE + TIME SELECT FIX
+   ========================= */
+.password-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.password-input {
+  padding-right: 70px !important;
+}
+
+.eye-button {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 50px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: #eef2f6;
+  color: #111827;
+  font-size: 24px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.overtime-time-grid {
+  margin-bottom: 8px;
+}
+
+.time-select-control {
+  font-weight: 850 !important;
+}
+
+.overtime-status {
+  margin-top: 6px;
+  margin-bottom: 12px;
+  font-size: 15px;
+}
+
+@media (max-width: 520px) {
+  .password-input {
+    padding-right: 72px !important;
+  }
+
+  .eye-button {
+    width: 52px;
+    height: 44px;
+    font-size: 25px;
+  }
+
+  .modal-panel .field-label {
+    font-size: 18px;
+    margin-top: 14px;
+  }
+
+  .time-select-control {
+    min-height: 54px;
+    font-size: 18px !important;
+  }
+}
+
+
+/* ERP V30 UI FIX - FULLSCREEN MODAL + NO SIDE DRAWER */
+.modal-overlay { align-items: stretch !important; }
+.modal-panel { height: 100dvh !important; max-height: 100dvh !important; border-radius: 0 !important; }
+.pick-list-lite { flex: 1 1 auto !important; min-height: 160px; }
+.side-menu, .backdrop { display: none !important; }
+
+
+/* =========================
+   ERP V30 FINAL POLISH - SOURCE BASELINE
+   1) Tăng ca: Bắt đầu / Kết thúc / Số giờ cùng 1 hàng.
+   2) Modal khóa vuốt ngoài, giảm lỗi vuốt xuống bị thoát.
+   3) Menu chính gọn hơn để chừa chỗ thêm module.
+   ========================= */
+
+html,
+body,
+#root,
+.app-shell {
+  overscroll-behavior-y: none;
+}
+
+.modal-overlay {
+  overscroll-behavior: none !important;
+  touch-action: none;
+}
+
+.modal-panel {
+  overscroll-behavior: contain !important;
+  touch-action: pan-y;
+}
+
+.pick-list-lite {
+  overscroll-behavior: contain !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Khu vực tăng ca gọn hơn */
+.overtime-compact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 0.72fr;
+  gap: 8px;
+  padding: 10px 14px 4px;
+  align-items: end;
+  flex: 0 0 auto;
+}
+
+.overtime-compact-grid .field-label {
+  margin: 0 0 5px !important;
+  font-size: 15px !important;
+  line-height: 1.1;
+}
+
+.overtime-compact-grid .form-control-sm {
+  height: 42px !important;
+  min-height: 42px !important;
+  font-size: 14px !important;
+  padding: 0 8px !important;
+  border-radius: 12px !important;
+}
+
+.overtime-hours-input {
+  text-align: center;
+  font-weight: 850 !important;
+}
+
+.note-compact {
+  margin: 8px 14px 8px !important;
+  padding: 8px 10px !important;
+  flex: 0 0 auto;
+}
+
+.modal-head-lite {
+  min-height: 68px;
+  padding: 10px 14px !important;
+}
+
+.modal-head-lite b {
+  font-size: 24px !important;
+}
+
+.modal-head-lite button {
+  width: 52px !important;
+  height: 52px !important;
+}
+
+.savebar-lite {
+  padding: 10px 14px 12px !important;
+  flex: 0 0 auto;
+}
+
+.pick-row-lite {
+  padding: 10px 12px !important;
+}
+
+.pick-row-lite b {
+  font-size: 18px;
+}
+
+.small-text {
+  font-size: 13px !important;
+  line-height: 1.25;
+}
+
+/* Menu chính gọn hơn, giữ nguyên phong cách */
+.menu-content {
+  padding-top: 14px !important;
+}
+
+.section-title {
+  margin: 10px 0 4px !important;
+  font-size: 14px !important;
+  line-height: 1.1;
+}
+
+.menu-item {
+  min-height: 44px !important;
+  padding: 4px 10px !important;
+  gap: 10px !important;
+  font-size: 18px !important;
+  line-height: 1.08 !important;
+}
+
+.menu-icon {
+  width: 32px !important;
+  flex-basis: 32px !important;
+  font-size: 24px !important;
+}
+
+.logout-button {
+  min-height: 42px !important;
+  margin-top: 12px !important;
+  font-size: 15px !important;
+}
+
+.retention {
+  margin-top: 10px !important;
+  padding: 7px !important;
+}
+
+/* Màn nhỏ: vẫn giữ 3 ô cùng hàng */
+@media (max-width: 420px) {
+  .overtime-compact-grid {
+    grid-template-columns: 1fr 1fr 0.68fr;
+    gap: 6px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .overtime-compact-grid .form-control-sm {
+    font-size: 13px !important;
+    padding: 0 6px !important;
+  }
+
+  .overtime-compact-grid .field-label {
+    font-size: 14px !important;
+  }
+
+  .note-compact {
+    margin-left: 10px !important;
+    margin-right: 10px !important;
+  }
+
+  .modal-head-lite b {
+    font-size: 22px !important;
+  }
+}
+
+
+/* =========================
+   ERP V30 FINAL MAIN MENU LOCK
+   Chữ menu giữ lớn như bản cũ, chỉ giảm khoảng cách và thu icon nhẹ.
+   ========================= */
+
+.menu-content {
+  padding: 15px 14px 0 !important;
+}
+
+.section-title {
+  margin: 9px 0 4px !important;
+  font-size: 15px !important;
+  line-height: 1.05 !important;
+}
+
+.menu-item {
+  min-height: 46px !important;
+  padding: 2px 10px !important;
+  gap: 9px !important;
+  font-size: 20px !important;
+  line-height: 1.06 !important;
+  font-weight: 800 !important;
+}
+
+.menu-icon {
+  width: 30px !important;
+  flex: 0 0 30px !important;
+  font-size: 22px !important;
+}
+
+.logout-button {
+  min-height: 42px !important;
+  margin-top: 10px !important;
+  font-size: 15px !important;
+}
+
+.retention {
+  margin-top: 8px !important;
+  padding: 6px !important;
+}
+
+/* Login chống lắc: không hiện fallback bộ phận trước khi API trả về */
+.login-screen select:disabled,
+.login-screen button:disabled {
+  opacity: .72;
+}
