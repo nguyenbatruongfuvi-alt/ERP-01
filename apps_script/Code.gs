@@ -711,7 +711,7 @@ function getLichSuNhapLieu(ngay, boPhan){
   const out = [];
   for (let i=1;i<data.length;i++){
     if (normDate_(data[i][2]) !== ngay) continue;
-    if (txt_(data[i][4]) !== boPhan) continue;
+    if (!sameBp_(data[i][4], boPhan)) continue;
     out.push({
       ngay: normDate_(data[i][2]),
       boPhanBaoCao: txt_(data[i][4]),
@@ -861,7 +861,33 @@ function getNhapLieuBundleV309(ngay, boPhan, loaiBaoCao, chiTiet){
   const loai = txt_(loaiBaoCao);
   const ct = txt_(chiTiet);
   const items = getChiTietNhapLieu(n, bp, loai, ct);
-  return {ok:true, ngay: n, boPhan: bp, loaiBaoCao: loai, chiTiet: ct, items: items, hasSavedBefore: hasEntrySavedV312_(n, bp, loai, ct) || items.length > 0, cache: getClientCache(bp)};
+  const savedAny = items.some(function(x){ return x && x.selected === true; });
+  return {ok:true, ngay: n, boPhan: bp, loaiBaoCao: loai, chiTiet: ct, items: items, hasSavedBefore: hasEntrySavedV312_(n, bp, loai, ct) || savedAny, cache: getClientCache(bp)};
+}
+
+
+function getTodayBootstrapV315(boPhan, ngay){
+  const n = normDate_(ngay || new Date());
+  const bp = txt_(boPhan);
+  const loaiTangCa = LOAI.TANG_CA;
+  const loaiBienDong = LOAI.BIEN_DONG;
+  const loaiVang = LOAI.VANG;
+  const tangCaList = ['Tăng ca sáng','Tăng ca trưa','Tăng ca chiều','Tăng ca đột xuất'];
+  const bienDongList = ['Công nhân mới','Nghỉ việc','Xin về sớm','Điều động sang tổ khác'];
+  const vangList = ['Vắng buổi sáng','Vắng buổi chiều','Vắng cả ngày'];
+  const cache = getClientCache(bp);
+  const counts = {};
+  counts[loaiTangCa] = getCountsByLoai(n, bp, loaiTangCa);
+  counts[loaiBienDong] = getCountsByLoai(n, bp, loaiBienDong);
+  counts[loaiVang] = getCountsByLoai(n, bp, loaiVang);
+  const bundles = {};
+  bundles[loaiTangCa] = {};
+  bundles[loaiBienDong] = {};
+  bundles[loaiVang] = {};
+  tangCaList.forEach(function(ct){ bundles[loaiTangCa][ct] = getNhapLieuBundleV309(n, bp, loaiTangCa, ct); });
+  bienDongList.forEach(function(ct){ bundles[loaiBienDong][ct] = getNhapLieuBundleV309(n, bp, loaiBienDong, ct); });
+  vangList.forEach(function(ct){ bundles[loaiVang][ct] = getNhapLieuBundleV309(n, bp, loaiVang, ct); });
+  return {ok:true, ngay:n, boPhan:bp, cache:cache, counts:counts, bundles:bundles, loadedAt:fmtTime_(new Date())};
 }
 
 /* ================= V23.5 FAST LOGIN INIT =================

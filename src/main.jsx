@@ -8,6 +8,7 @@ const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
 const CACHE_KEY = 'erp_v30_client_cache'
 const DRAFT_PREFIX = 'erp_v30_draft_v12'
+const PRELOAD_PREFIX = 'erp_v30_today_preload_v15'
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -106,6 +107,27 @@ async function api(action, args = []) {
 function readJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key) || '') || fallback } catch { return fallback } }
 function writeJson(key, value) { localStorage.setItem(key, JSON.stringify(value)) }
 function clearJson(key) { localStorage.removeItem(key) }
+function preloadKeyFor(boPhan, ngay = today()) { return `${PRELOAD_PREFIX}_${ngay}_${boPhan}` }
+function loaiForType(type) { return type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type }
+function getPreloadedToday(boPhan) { return readJson(preloadKeyFor(boPhan), null) }
+function setPreloadedToday(boPhan, data) { if (data) writeJson(preloadKeyFor(boPhan, data.ngay || today()), data) }
+async function preloadTodayData(boPhan) {
+  if (!boPhan || !navigator.onLine) return null
+  try {
+    const data = await api('getTodayBootstrapV315', [boPhan, today()])
+    setPreloadedToday(boPhan, data)
+    if (data?.cache) writeJson(CACHE_KEY, { ...data.cache, today: data })
+    return data
+  } catch {
+    try {
+      const cache = await api('getClientCache', [boPhan])
+      const data = { ngay: today(), boPhan, cache, counts: {}, bundles: {}, loadedAt: new Date().toISOString() }
+      setPreloadedToday(boPhan, data)
+      writeJson(CACHE_KEY, { ...cache, today: data })
+      return data
+    } catch { return null }
+  }
+}
 function queueSave(action, args) {
   const q = readJson(OFFLINE_QUEUE_KEY, [])
   q.push({ id: Date.now() + '-' + Math.random().toString(16).slice(2), action, args, time: new Date().toISOString() })
@@ -140,31 +162,46 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
   const [showPass, setShowPass] = useState(false)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  useEffect(() => {}, [departments, department])
+  const [preloading, setPreloading] = useState(false)
   useEffect(() => { api('getLoginInitFast').then(r => { setDepartments(r.boPhanList || fallbackDepartments) }).catch(() => {}) }, [])
+  useEffect(() => {
+    if (!department) return
+    let alive = true
+    setPreloading(true)
+    setMsg('⏳ Đang tải sẵn dữ liệu hôm nay của bộ phận...')
+    preloadTodayData(department).then(data => {
+      if (!alive) return
+      if (data?.cache) setCache({ ...data.cache, today: data })
+      setMsg(data ? '✅ Đã tải sẵn dữ liệu hôm nay. Có thể đăng nhập.' : '')
+    }).finally(() => { if (alive) setPreloading(false) })
+    return () => { alive = false }
+  }, [department])
   async function doLogin() {
     if (!department) { setMsg('Vui lòng chọn bộ phận.'); return }
-    setBusy(true); setMsg('')
+    setBusy(true); setMsg('Đang đăng nhập...')
     try {
+      const preload = getPreloadedToday(department)
+      if (preload?.cache) setCache({ ...preload.cache, today: preload })
       const info = await api('loginBoPhan', [department, password])
-      const session = { ...info, loggedAt: Date.now() }
+      const session = { ...info, todayPreloaded: !!preload, loggedAt: Date.now() }
       writeJson(SESSION_KEY, session); setSession(session)
-      api('getClientCache', [info.boPhan]).then(c => { writeJson(CACHE_KEY, c); setCache(c) }).catch(() => {})
+      if (!preload?.cache) preloadTodayData(info.boPhan).then(data => { if (data?.cache) setCache({ ...data.cache, today: data }) }).catch(() => {})
     } catch (e) { setMsg(e.message || 'Đăng nhập lỗi.') }
     setBusy(false)
   }
+  function chooseDepartment(value) { setDepartment(value); setPassword('') }
   return <main className="login-screen">
     <div className="login-logo-slot"><img className="login-logo-img" src="/logo-ph.png" alt="Nhà Phúc Hậu" /></div>
     <div className="login-brand login-brand-centered"><span>Quản lý sản xuất</span></div>
     <label className="form-label">Bộ phận</label>
-    <select className="form-control" value={department} autoComplete="off" onChange={e => setDepartment(e.target.value)}><option value="">-- Chọn bộ phận --</option>{departments.map(name => <option key={name} value={name}>{name}</option>)}</select>
+    <select className="form-control" value={department} autoComplete="off" onChange={e => chooseDepartment(e.target.value)}><option value="">-- Chọn bộ phận --</option>{departments.map(name => <option key={name} value={name}>{name}</option>)}</select>
     <label className="form-label">Mật khẩu</label>
     <div className="password-wrap">
       <input className="form-control password-input" type={showPass ? 'text' : 'password'} name="erp_login_passcode" autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false} placeholder="Nhập mật khẩu" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && doLogin()} />
       <button type="button" className="eye-button" onClick={() => setShowPass(v => !v)} aria-label={showPass ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}>{showPass ? '🙈' : '👁'}</button>
     </div>
     <div style={{ height: 24 }} /><button className="primary-button" style={{ height: 56, fontSize: 22 }} disabled={busy} onClick={doLogin}>{busy ? 'Đang đăng nhập...' : 'Đăng nhập'}</button>
-    {msg && <div className="msg err">{msg}</div>}
+    {msg && <div className={`msg ${msg.includes('✅') || msg.includes('⏳') ? 'ok' : 'err'}`}>{msg}</div>}
   </main>
 }
 function HomeScreen({ onSelect, syncCount, session, onLogout }) {
@@ -217,9 +254,25 @@ function useStaff(session, cache) {
   return staff
 }
 function DataEntryScreen({ type, items, session, cache }) {
-  const staff = useStaff(session, cache); const [counts, setCounts] = useState({}); const [open, setOpen] = useState(null)
-  useEffect(() => { const loai = type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type; api('getCountsByLoai', [today(), session.boPhan, loai]).then(setCounts).catch(() => {}) }, [type, session.boPhan])
-  return <><div className="card">{items.map(item => <div className="tile-card" key={item} onClick={() => setOpen(item)}><div className="tile-title">{item}</div><div className="tile-sub">SL: {counts[item] || 0} người</div></div>)}</div>{open && <PickModal title={open} type={type} staff={staff} session={session} onClose={() => setOpen(null)} onSaved={() => api('getCountsByLoai', [today(), session.boPhan, type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type]).then(setCounts).catch(() => {})} />}</>
+  const staff = useStaff(session, cache)
+  const loai = loaiForType(type)
+  const preload = cache?.today?.boPhan === session.boPhan ? cache.today : getPreloadedToday(session.boPhan)
+  const [counts, setCounts] = useState(() => preload?.counts?.[loai] || {})
+  const [open, setOpen] = useState(null)
+  useEffect(() => {
+    const pre = getPreloadedToday(session.boPhan)
+    if (pre?.counts?.[loai]) setCounts(pre.counts[loai])
+    api('getCountsByLoai', [today(), session.boPhan, loai]).then(setCounts).catch(() => {})
+  }, [type, session.boPhan])
+  function refreshCounts() {
+    api('getCountsByLoai', [today(), session.boPhan, loai]).then(c => {
+      setCounts(c)
+      const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {} }
+      old.counts = { ...(old.counts || {}), [loai]: c }
+      setPreloadedToday(session.boPhan, old)
+    }).catch(() => {})
+  }
+  return <><div className="card">{items.map(item => <div className="tile-card" key={item} onClick={() => setOpen(item)}><div className="tile-title">{item}</div><div className="tile-sub">SL: {counts[item] || 0} người</div></div>)}</div>{open && <PickModal title={open} type={type} staff={staff} session={session} cache={cache} onClose={() => setOpen(null)} onSaved={refreshCounts} />}</>
 }
 function draftKeyFor(session, type, title) {
   return `${DRAFT_PREFIX}_${today()}_${session.boPhan}_${type}_${title}`
@@ -240,7 +293,8 @@ function normalizeRow(row) {
 }
 function mergeBundleRows(bundle, staff, session, type, title) {
   const cacheRows = bundle?.cache?.nhanSuBoPhan || staff || []
-  const saved = (bundle?.items || []).map(normalizeRow)
+  const bundleRows = (bundle?.items || []).map(normalizeRow)
+  const saved = bundleRows.filter(x => x.selected === true)
   const savedMap = new Map(saved.map(x => [x.maNv, x]))
   const hasSavedBefore = bundle?.hasSavedBefore === true || saved.length > 0
 
@@ -252,18 +306,17 @@ function mergeBundleRows(bundle, staff, session, type, title) {
   saved.forEach(x => { if (!baseSet.has(x.maNv)) base.push({ ...x, selected: true, outside: true }) })
 
   const localDraft = readJson(draftKeyFor(session, type, title), null)
-  if (localDraft && Array.isArray(localDraft.items)) {
+  if (!hasSavedBefore && localDraft && Array.isArray(localDraft.items)) {
     const draftMap = new Map(localDraft.items.map(x => [x.maNv, x]))
     base = base.map(p => ({ ...p, selected: draftMap.has(p.maNv), trangThai: draftMap.get(p.maNv)?.trangThai || p.trangThai }))
     return { rows: base, batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
   }
 
-  // Tăng ca: lần đầu mở trong ngày thì chọn sẵn cả tổ. Đã từng lưu thì giữ đúng dữ liệu đã lưu, kể cả lưu 0 người.
   if (type === 'Tăng ca' && !hasSavedBefore) base = base.map(p => ({ ...p, selected: true }))
-  const first = saved[0] || {}
+  const first = saved.find(x => x.batDau || x.ketThuc || x.soGio) || saved[0] || {}
   return { rows: base, batDau: first.batDau || '', ketThuc: first.ketThuc || '', soGio: first.soGio || '', hasSavedBefore }
 }
-function PickModal({ title, type, staff, session, onClose, onSaved }) {
+function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   const [rows, setRows] = useState([])
   const [msg, setMsg] = useState('')
   const [batDau, setBatDau] = useState('')
@@ -274,8 +327,18 @@ function PickModal({ title, type, staff, session, onClose, onSaved }) {
 
   useEffect(() => {
     let alive = true
-    setLoading(true)
-    api('getNhapLieuBundleV309', [today(), session.boPhan, type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type, title])
+    const loai = loaiForType(type)
+    const pre = (cache?.today?.boPhan === session.boPhan ? cache.today : getPreloadedToday(session.boPhan))
+    const preBundle = pre?.bundles?.[loai]?.[title]
+    if (preBundle) {
+      const merged = mergeBundleRows(preBundle, staff, session, type, title)
+      setRows(merged.rows)
+      if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+    api('getNhapLieuBundleV309', [today(), session.boPhan, loai, title])
       .then(bundle => {
         if (!alive) return
         const merged = mergeBundleRows(bundle, staff, session, type, title)
@@ -284,6 +347,9 @@ function PickModal({ title, type, staff, session, onClose, onSaved }) {
           setBatDau(merged.batDau || '')
           setKetThuc(merged.ketThuc || '')
         }
+        const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {} }
+        old.bundles = old.bundles || {}; old.bundles[loai] = old.bundles[loai] || {}; old.bundles[loai][title] = bundle
+        setPreloadedToday(session.boPhan, old)
       })
       .catch(e => {
         if (!alive) return
@@ -294,14 +360,14 @@ function PickModal({ title, type, staff, session, onClose, onSaved }) {
           setBatDau(localDraft.batDau || '')
           setKetThuc(localDraft.ketThuc || '')
           setMsg(e.offline ? 'Đang offline thật: dùng dữ liệu tạm trên máy.' : 'API lỗi: đang dùng dữ liệu tạm trên máy.')
-        } else {
+        } else if (!preBundle) {
           setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })))
           setMsg(e.message || 'Không tải được dữ liệu.')
         }
       })
       .finally(() => alive && setLoading(false))
     return () => { alive = false }
-  }, [title, type, session.boPhan])
+  }, [title, type, session.boPhan, cache])
 
   const selectedCount = rows.filter(x => x.selected).length
   function toggle(ma) { setRows(list => list.map(x => x.maNv === ma ? { ...x, selected: !x.selected } : x)) }
@@ -321,7 +387,7 @@ function PickModal({ title, type, staff, session, onClose, onSaved }) {
       trangThai: type === 'Vắng mặt' ? (x.trangThai === 'Không phép' ? 'Không phép' : 'Có phép') : 'Đã chọn',
     }))
     const requestId = `nl_${Date.now()}_${Math.random().toString(16).slice(2)}`
-    const payload = { requestId, ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, chiTiet: title, items, batDau, ketThuc, soGio, loaiBaoCao, ghiChu: '' }
+    const payload = { requestId, localDraftAt: Date.now(), ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, chiTiet: title, items, batDau, ketThuc, soGio, loaiBaoCao, ghiChu: '' }
     writeJson(draftKeyFor(session, type, title), payload)
     setSaving(true); setMsg('⏳ Đang lưu dữ liệu...')
     try {
