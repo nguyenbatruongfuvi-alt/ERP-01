@@ -1174,3 +1174,100 @@ body,
   -webkit-overflow-scrolling: touch !important;
   touch-action: pan-x pan-y !important;
 }
+
+/* =====================================================
+   ERP V30.20 REAL MOBILE SCROLL FIX
+   Lỗi V30.19: JSX dùng .pick-scroll-area nhưng CSS chỉ fix .pick-list-lite,
+   nên phần danh sách bị nằm trong modal-panel overflow:hidden và không kéo được.
+   Dán cuối file src/styles.css.
+   ===================================================== */
+
+html,
+body,
+#root,
+.app-shell {
+  height: 100%;
+  min-height: 100%;
+  overscroll-behavior-y: none;
+}
+
+.modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: stretch !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  touch-action: auto !important;
+  overscroll-behavior: none !important;
+}
+
+.modal-panel {
+  width: 100% !important;
+  max-width: 480px !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  min-height: 0 !important;
+  margin: 0 auto !important;
+  border-radius: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  touch-action: auto !important;
+  overscroll-behavior: contain !important;
+}
+
+.modal-head-lite,
+.overtime-compact-grid,
+.note-compact,
+.savebar-lite {
+  flex: 0 0 auto !important;
+}
+
+/* Đây mới là vùng cuộn thật của V30.19 */
+.pick-scroll-area {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
+  overscroll-behavior: contain !important;
+  padding: 0 0 12px !important;
+}
+
+/* Danh sách nằm trong pick-scroll-area, không tự khóa chiều cao nữa */
+.pick-scroll-area .pick-list-lite,
+.pick-scroll-area .external-results {
+  display: block !important;
+  flex: none !important;
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  touch-action: auto !important;
+  -webkit-overflow-scrolling: auto !important;
+}
+
+.pick-section-row,
+.external-search-box,
+.external-results,
+.pick-list-lite {
+  flex-shrink: 0 !important;
+}
+
+.savebar-lite {
+  position: relative !important;
+  z-index: 5 !important;
+  background: #fff !important;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+}
+
+.page,
+.table-scroll,
+.summary-kpi-grid {
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-x pan-y !important;
+}
