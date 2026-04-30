@@ -1125,291 +1125,52 @@ body,
   opacity: .72;
 }
 
-/* =========================
-   ERP V30.16 FAST DATA + SCROLL FIX
-   ========================= */
-html, body, #root, .app-shell {
-  overscroll-behavior-y: auto !important;
-  touch-action: manipulation !important;
+/* ===== FIX MOBILE SCROLL V30.20 =====
+   Fix modal/list scroll freeze on mobile browser/PWA.
+   Paste at the END of src/styles.css.
+*/
+html,
+body,
+#root {
+  min-height: 100%;
 }
+
 .modal-overlay {
   touch-action: auto !important;
-  overscroll-behavior: auto !important;
+  overflow: hidden !important;
+  align-items: stretch !important;
 }
+
 .modal-panel {
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
   touch-action: auto !important;
   overscroll-behavior: contain !important;
 }
+
+.modal-head-lite,
+.overtime-compact-grid,
+.note-compact,
+.savebar-lite {
+  flex: 0 0 auto !important;
+}
+
 .pick-list-lite {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
   -webkit-overflow-scrolling: touch !important;
   touch-action: pan-y !important;
-  max-height: none !important;
+  overscroll-behavior: contain !important;
 }
+
+.page,
 .table-scroll {
-  overflow-x: auto !important;
-  overflow-y: auto !important;
+  overflow: auto !important;
   -webkit-overflow-scrolling: touch !important;
   touch-action: pan-x pan-y !important;
-}
-.summary-table {
-  min-width: 760px !important;
-}
-.savebar-lite {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-}
-
-/* =========================
-   ERP V30.17 STABLE OFFLINE FAST
-   - Splash chống nhảy màn hình
-   - Màu nút lưu theo trạng thái
-   - Vắng mặt: Có phép/Không phép + Đã chọn/Bỏ chọn
-   ========================= */
-.boot-screen {
-  min-height: 100vh;
-  background: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-.boot-card {
-  width: 100%;
-  max-width: 360px;
-  text-align: center;
-  background: #ffffff;
-  border-radius: 24px;
-  padding: 24px 18px;
-}
-.boot-logo {
-  width: 112px;
-  height: 112px;
-  object-fit: contain;
-  margin: 0 auto 10px;
-  display: block;
-}
-.boot-title {
-  color: var(--color-primary);
-  font-size: 24px;
-  font-weight: 900;
-  margin-bottom: 16px;
-}
-.boot-spinner {
-  width: 34px;
-  height: 34px;
-  margin: 0 auto 12px;
-  border: 4px solid #d1fadf;
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: erpSpin .8s linear infinite;
-}
-.boot-text {
-  color: var(--color-muted);
-  font-size: 15px;
-  font-weight: 800;
-}
-@keyframes erpSpin { to { transform: rotate(360deg); } }
-
-.primary-button.save-state-idle {
-  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-dark));
-}
-.primary-button.save-state-saving {
-  background: linear-gradient(180deg, #f79009, #dc6803) !important;
-  box-shadow: 0 8px 18px rgba(247, 144, 9, 0.22) !important;
-}
-.primary-button.save-state-saved {
-  background: linear-gradient(180deg, #12b76a, #027a48) !important;
-  box-shadow: 0 8px 18px rgba(18, 183, 106, 0.22) !important;
-}
-.primary-button.save-state-error {
-  background: linear-gradient(180deg, #f04438, #b42318) !important;
-  box-shadow: 0 8px 18px rgba(240, 68, 56, 0.22) !important;
-}
-.primary-button.save-state-offline {
-  background: linear-gradient(180deg, #fdb022, #dc6803) !important;
-  box-shadow: 0 8px 18px rgba(253, 176, 34, 0.22) !important;
-}
-
-.row-actions-lite {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex: 0 0 auto;
-}
-.status-mini {
-  min-width: 118px !important;
-  border: 1px solid #d0d5dd !important;
-  background: #fff !important;
-  color: var(--color-text) !important;
-}
-.selected-mini {
-  min-width: 92px !important;
-}
-@media (max-width: 420px) {
-  .row-actions-lite {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
-  }
-  .status-mini,
-  .selected-mini {
-    min-width: 108px !important;
-  }
-  .pick-row-lite {
-    gap: 6px !important;
-  }
-}
-
-/* =========================
-   ERP V30.19 - compact external worker search
-   ========================= */
-.pick-scroll-area {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 0 14px 8px;
-}
-.pick-scroll-area .pick-list-lite {
-  margin: 0 0 12px !important;
-}
-.note-mini {
-  display: block;
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--color-muted);
-  font-weight: 750;
-}
-.pick-section-row {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-bottom: 1px solid var(--color-border);
-  background: #fff;
-  padding: 10px 2px;
-  font-size: 14px;
-  line-height: 1.2;
-}
-.pick-section-row b {
-  flex: 1 1 auto;
-  font-size: 15px;
-  font-weight: 900;
-}
-.pick-section-row span {
-  color: var(--color-muted);
-  font-size: 13px;
-  font-weight: 750;
-}
-.pick-section-row em {
-  min-width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  background: #dcfce7;
-  color: var(--color-green);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-style: normal;
-  font-weight: 900;
-}
-.external-search-box {
-  min-height: 50px;
-  border: 1px solid #b8d9c4;
-  border-radius: 12px;
-  background: #fff;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  margin: 10px 0 8px;
-}
-.external-search-box input {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 44px;
-  border: 0;
-  outline: 0;
-  font-size: 15px;
-  font-weight: 650;
-  color: var(--color-text);
-}
-.external-search-box input::placeholder {
-  color: #667085;
-}
-.external-search-box button {
-  width: 34px;
-  height: 34px;
-  border: 0;
-  background: #eef2f6;
-  border-radius: 10px;
-  font-size: 22px;
-  font-weight: 900;
-  color: #344054;
-}
-.search-ico {
-  font-size: 24px;
-  color: #667085;
-  line-height: 1;
-}
-.external-results {
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  overflow: hidden;
-  background: #fff;
-  margin-bottom: 10px;
-}
-.pick-row-lite.outside,
-.pick-row-lite.external {
-  background: #fffdf7;
-}
-.pick-row-lite.outside.selected,
-.pick-row-lite.external.selected {
-  background: #fff7e6;
-  border-left-color: #f79009;
-}
-.row-actions-lite {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-}
-.status-mini {
-  min-width: 98px !important;
-  border: 1px solid var(--color-border);
-  background: #fff;
-  color: var(--color-text);
-}
-.selected-mini {
-  background: #dcfce7 !important;
-  color: var(--color-green) !important;
-  border: 1px solid #b8d9c4 !important;
-  box-shadow: none !important;
-}
-@media (max-width: 520px) {
-  .pick-scroll-area {
-    padding: 0 10px 8px;
-  }
-  .pick-section-row b {
-    font-size: 14px;
-  }
-  .pick-section-row span {
-    max-width: 105px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-  .external-search-box input {
-    font-size: 14px;
-  }
-  .row-actions-lite {
-    gap: 5px;
-  }
-  .status-mini {
-    min-width: 86px !important;
-  }
 }
