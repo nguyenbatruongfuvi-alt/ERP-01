@@ -1204,3 +1204,46 @@ function doPost(e) {
     return jsonV23_({ ok:false, error: err && err.message ? err.message : String(err) });
   }
 }
+
+/* V30.17 alias: dùng chung lõi fast bootstrap V30.16, giữ tên version mới cho Vercel */
+function getTodayBootstrapV317(boPhan, ngay) {
+  return getTodayBootstrapV316(boPhan, ngay);
+}
+
+/* Override API maps to expose V30.17 */
+function apiMapV304_() {
+  return {
+    appInit: appInit,
+    getLoginInitFast: getLoginInitFast,
+    getDanhSachBoPhan: getDanhSachBoPhan,
+    loginBoPhan: loginBoPhan,
+    getDanhSachToTruong: getDanhSachToTruong,
+    searchNhanSu: searchNhanSu,
+    getThongTinNhanSu: getThongTinNhanSu,
+    getBaoCaoTong: getBaoCaoTong,
+    saveBaoCaoTong: saveBaoCaoTong,
+    getChiTietVang: getChiTietVang,
+    getChiTietNhapLieu: getChiTietNhapLieu,
+    saveChiTietVang: saveChiTietVang,
+    saveNhapLieu: saveNhapLieu,
+    getTongQuanNhapLieu: getTongQuanNhapLieu,
+    getBaoCaoTongCongTy: getBaoCaoTongCongTy,
+    getDanhSachTangCaXemTruoc: getDanhSachTangCaXemTruoc,
+    exportTangCaExcelShare: exportTangCaExcelShare,
+    getDanhSachCongViec: getDanhSachCongViec,
+    saveCongViec: saveCongViec,
+    getLichSuNhapLieu: getLichSuNhapLieu,
+    getNhanSuTheoBoPhan: getNhanSuTheoBoPhan,
+    getCountsByLoai: getCountsByLoai,
+    doiMatKhau: doiMatKhau,
+    getBangTangCaThang: getBangTangCaThang,
+    getClientCache: getClientCache,
+    getNhapLieuBundleV309: getNhapLieuBundleV309,
+    getTodayBootstrapV315: getTodayBootstrapV315,
+    getTodayBootstrapV316: getTodayBootstrapV316,
+    getTodayBootstrapV317: getTodayBootstrapV317,
+    appSetup: appSetup,
+    installDailyCleanupTrigger: installDailyCleanupTrigger,
+    cleanupOldData: cleanupOldData
+  };
+}

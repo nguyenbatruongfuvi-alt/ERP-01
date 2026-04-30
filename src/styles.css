@@ -1161,3 +1161,105 @@ html, body, #root, .app-shell {
   bottom: 0;
   z-index: 5;
 }
+
+/* =========================
+   ERP V30.17 STABLE OFFLINE FAST
+   - Splash chống nhảy màn hình
+   - Màu nút lưu theo trạng thái
+   - Vắng mặt: Có phép/Không phép + Đã chọn/Bỏ chọn
+   ========================= */
+.boot-screen {
+  min-height: 100vh;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.boot-card {
+  width: 100%;
+  max-width: 360px;
+  text-align: center;
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 24px 18px;
+}
+.boot-logo {
+  width: 112px;
+  height: 112px;
+  object-fit: contain;
+  margin: 0 auto 10px;
+  display: block;
+}
+.boot-title {
+  color: var(--color-primary);
+  font-size: 24px;
+  font-weight: 900;
+  margin-bottom: 16px;
+}
+.boot-spinner {
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 12px;
+  border: 4px solid #d1fadf;
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: erpSpin .8s linear infinite;
+}
+.boot-text {
+  color: var(--color-muted);
+  font-size: 15px;
+  font-weight: 800;
+}
+@keyframes erpSpin { to { transform: rotate(360deg); } }
+
+.primary-button.save-state-idle {
+  background: linear-gradient(180deg, var(--color-primary), var(--color-primary-dark));
+}
+.primary-button.save-state-saving {
+  background: linear-gradient(180deg, #f79009, #dc6803) !important;
+  box-shadow: 0 8px 18px rgba(247, 144, 9, 0.22) !important;
+}
+.primary-button.save-state-saved {
+  background: linear-gradient(180deg, #12b76a, #027a48) !important;
+  box-shadow: 0 8px 18px rgba(18, 183, 106, 0.22) !important;
+}
+.primary-button.save-state-error {
+  background: linear-gradient(180deg, #f04438, #b42318) !important;
+  box-shadow: 0 8px 18px rgba(240, 68, 56, 0.22) !important;
+}
+.primary-button.save-state-offline {
+  background: linear-gradient(180deg, #fdb022, #dc6803) !important;
+  box-shadow: 0 8px 18px rgba(253, 176, 34, 0.22) !important;
+}
+
+.row-actions-lite {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.status-mini {
+  min-width: 118px !important;
+  border: 1px solid #d0d5dd !important;
+  background: #fff !important;
+  color: var(--color-text) !important;
+}
+.selected-mini {
+  min-width: 92px !important;
+}
+@media (max-width: 420px) {
+  .row-actions-lite {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .status-mini,
+  .selected-mini {
+    min-width: 108px !important;
+  }
+  .pick-row-lite {
+    gap: 6px !important;
+  }
+}

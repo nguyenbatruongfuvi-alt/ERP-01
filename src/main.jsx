@@ -8,7 +8,9 @@ const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
 const CACHE_KEY = 'erp_v30_client_cache'
 const DRAFT_PREFIX = 'erp_v30_draft_v12'
-const PRELOAD_PREFIX = 'erp_v30_today_preload_v16'
+const PRELOAD_PREFIX = 'erp_v30_today_preload_v17'
+const LAST_DEPT_KEY = 'erp_v30_last_department'
+const BOOT_KEY = 'erp_v30_boot_init_v17'
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -114,7 +116,7 @@ function setPreloadedToday(boPhan, data) { if (data) writeJson(preloadKeyFor(boP
 async function preloadTodayData(boPhan) {
   if (!boPhan || !navigator.onLine) return null
   try {
-    const data = await api('getTodayBootstrapV316', [boPhan, today()])
+    const data = await api('getTodayBootstrapV317', [boPhan, today()])
     setPreloadedToday(boPhan, data)
     if (data?.cache) writeJson(CACHE_KEY, { ...data.cache, today: data })
     return data
@@ -163,7 +165,16 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [preloading, setPreloading] = useState(false)
-  useEffect(() => { api('getLoginInitFast').then(r => { setDepartments(r.boPhanList || fallbackDepartments) }).catch(() => {}) }, [])
+  useEffect(() => {
+    const boot = readJson(BOOT_KEY, null)
+    if (boot?.boPhanList?.length) setDepartments(boot.boPhanList)
+    api('getLoginInitFast').then(r => {
+      writeJson(BOOT_KEY, r)
+      setDepartments(r.boPhanList || fallbackDepartments)
+      const last = readJson(LAST_DEPT_KEY, '')
+      if (last) preloadTodayData(last).then(data => { if (data?.cache) setCache({ ...data.cache, today: data }) }).catch(() => {})
+    }).catch(() => {})
+  }, [])
   useEffect(() => {
     if (!department) return
     let alive = true
@@ -189,7 +200,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
     } catch (e) { setMsg(e.message || 'Đăng nhập lỗi.') }
     setBusy(false)
   }
-  function chooseDepartment(value) { setDepartment(value); setPassword('') }
+  function chooseDepartment(value) { setDepartment(value); setPassword(''); if (value) writeJson(LAST_DEPT_KEY, value) }
   return <main className="login-screen">
     <div className="login-logo-slot"><img className="login-logo-img" src="/logo-ph.png" alt="Nhà Phúc Hậu" /></div>
     <div className="login-brand login-brand-centered"><span>Quản lý sản xuất</span></div>
@@ -200,7 +211,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
       <input className="form-control password-input" type={showPass ? 'text' : 'password'} name="erp_login_passcode" autoComplete="new-password" autoCorrect="off" autoCapitalize="off" spellCheck={false} placeholder="Nhập mật khẩu" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && doLogin()} />
       <button type="button" className="eye-button" onClick={() => setShowPass(v => !v)} aria-label={showPass ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}>{showPass ? '🙈' : '👁'}</button>
     </div>
-    <div style={{ height: 24 }} /><button className="primary-button" style={{ height: 56, fontSize: 22 }} disabled={busy || preloading} onClick={doLogin}>{busy ? 'Đang đăng nhập...' : preloading ? 'Đang tải dữ liệu...' : 'Đăng nhập'}</button>
+    <div style={{ height: 24 }} /><button className="primary-button" style={{ height: 56, fontSize: 22 }} disabled={busy} onClick={doLogin}>{busy ? 'Đang đăng nhập...' : preloading ? 'Đăng nhập khi dữ liệu đang tải' : 'Đăng nhập'}</button>
     {msg && <div className={`msg ${msg.includes('✅') || msg.includes('⏳') ? 'ok' : 'err'}`}>{msg}</div>}
   </main>
 }
@@ -214,6 +225,17 @@ function AppHeader({ session, onMenu }) { return <header className="app-header">
 function SideMenu({ open, onClose, onSelect, syncCount, onLogout }) { return <><aside className={`side-menu ${open ? 'open' : ''}`}><div className="side-brand"><span>Quản lý sản xuất</span></div><MenuContent onSelect={onSelect} syncCount={syncCount} onLogout={onLogout} /></aside><div className={`backdrop ${open ? 'show' : ''}`} onClick={onClose} /></> }
 function Chrome({ setScreen, session, children, syncCount, onLogout }) { return <><AppHeader session={session} onMenu={() => setScreen('home')} /><main className="page">{children}</main></> }
 function Status({ text, ok = true }) { return text ? <div className={`msg ${ok ? 'ok' : 'err'}`}>{text}</div> : null }
+function saveStateFromMsg(msg, saving) {
+  if (saving || String(msg || '').includes('Đang lưu')) return 'saving'
+  if (String(msg || '').includes('ĐÃ LƯU') || String(msg || '').includes('THÀNH CÔNG')) return 'saved'
+  if (String(msg || '').includes('Offline') || String(msg || '').includes('lưu tạm')) return 'offline'
+  if (String(msg || '').includes('CHƯA LƯU') || String(msg || '').includes('Lỗi') || String(msg || '').includes('lỗi')) return 'error'
+  return 'idle'
+}
+function saveButtonClass(base, msg, saving) { return `${base} save-state-${saveStateFromMsg(msg, saving)}` }
+function BootSplash({ text = 'Đang tải dữ liệu gốc...' }) {
+  return <main className="boot-screen"><div className="boot-card"><img className="boot-logo" src="/logo-ph.png" alt="Nhà Phúc Hậu" /><div className="boot-title">Quản lý sản xuất</div><div className="boot-spinner" /><div className="boot-text">{text}</div></div></main>
+}
 
 function ReportScreen({ session }) {
   const [data, setData] = useState(null), [form, setForm] = useState({ tongCongNhan: '', coMat: '', ghiChu: '' }), [msg, setMsg] = useState('')
@@ -237,7 +259,7 @@ function ReportScreen({ session }) {
     <label className="field-label">Tổng công nhân</label><input className="form-control form-control-sm" value={form.tongCongNhan} onChange={e => setForm({ ...form, tongCongNhan: e.target.value })} />
     <label className="field-label">Có mặt</label><input className="form-control form-control-sm" value={form.coMat} onChange={e => setForm({ ...form, coMat: e.target.value })} />
     <label className="field-label">Ghi chú</label><input className="form-control form-control-sm" value={form.ghiChu} onChange={e => setForm({ ...form, ghiChu: e.target.value })} />
-    <div style={{ height: 12 }} /><button className="primary-button" disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : 'Nhập / Cập nhật báo cáo'}</button><Status text={msg} />
+    <div style={{ height: 12 }} /><button className={saveButtonClass("primary-button", msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : 'Nhập / Cập nhật báo cáo'}</button><Status text={msg} />
   </div>
 }
 function CompanyScreen() {
@@ -427,8 +449,8 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     </>}
     <div className="note-compact">✅ Đã chọn: <b>{selectedCount}</b> nhân viên</div>
     {loading && <div className="note-compact">Đang tải dữ liệu...</div>}
-    <div className="pick-list-lite">{rows.map(p => <div className={`pick-row-lite ${p.selected ? 'selected' : ''}`} key={p.maNv} onClick={() => toggle(p.maNv)}><div><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}{p.outside ? ' · ngoài tổ' : ''}{type === 'Tăng ca' && <> · Giờ TC: {batDau || '--:--'} → {ketThuc || '--:--'} = {soGio || '0'} giờ</>}</div></div>{type === 'Vắng mặt' && p.selected ? <select className="mini" value={p.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onClick={e => e.stopPropagation()} onChange={e => setAbsentStatus(p.maNv, e.target.value)}><option>Có phép</option><option>Không phép</option></select> : <button className={p.selected ? 'secondary-button mini' : 'primary-button mini'}>{p.selected ? 'Đã chọn' : 'Chọn'}</button>}</div>)}</div>
-    <div className="savebar-lite"><button className="primary-button" disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : 'Lưu / Cập nhật'}</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('lỗi') && !msg.includes('Lỗi')} /></div></div></div>
+    <div className="pick-list-lite">{rows.map(p => <div className={`pick-row-lite ${p.selected ? 'selected' : ''}`} key={p.maNv} onClick={() => toggle(p.maNv)}><div><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}{p.outside ? ' · ngoài tổ' : ''}{type === 'Tăng ca' && <> · Giờ TC: {batDau || '--:--'} → {ketThuc || '--:--'} = {soGio || '0'} giờ</>}</div></div>{type === 'Vắng mặt' && p.selected ? <div className="row-actions-lite" onClick={e => e.stopPropagation()}><select className="mini status-mini" value={p.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => setAbsentStatus(p.maNv, e.target.value)}><option>Có phép</option><option>Không phép</option></select><button className="secondary-button mini selected-mini" onClick={() => toggle(p.maNv)}>Đã chọn</button></div> : <button className={p.selected ? 'secondary-button mini' : 'primary-button mini'} onClick={e => { e.stopPropagation(); toggle(p.maNv) }}>{p.selected ? 'Đã chọn' : 'Chọn'}</button>}</div>)}</div>
+    <div className="savebar-lite"><button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : 'Lưu / Cập nhật'}</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('lỗi') && !msg.includes('Lỗi') && !msg.includes('CHƯA LƯU')} /></div></div></div>
 }
 function StaffScreen({ session, cache }) { const staff = useStaff(session, cache); return <div className="card"><div className="table-scroll"><table className="summary-table staff-table"><thead><tr><th>Mã NV</th><th>Tên NV</th><th>Bộ phận</th><th>Trạng thái</th></tr></thead><tbody>{staff.map(row => <tr key={row.maNv}><td>{row.maNv}</td><td>{row.tenNv}</td><td>{row.boPhan}</td><td>{row.trangThai}</td></tr>)}</tbody></table></div></div> }
 function AccountScreen({ session, setSession }) {
@@ -440,10 +462,47 @@ function TaskScreen({ session }) { const [jobs, setJobs] = useState([]); useEffe
 function PrintOvertimeScreen({ session, departments }) { const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả'), [thang, setThang] = useState(monthNow()); async function load() { try { const r = await api('getDanhSachTangCaXemTruoc', ['THEO_THANG', bp, '', '', thang]); setRows(r.rows || []); setMsg(r.message || '') } catch (e) { setMsg(e.message) } } return <div className="card"><div className="section-label">Bộ phận</div><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu 45 ngày gần nhất.</div><button className="secondary-button" onClick={load}>👁️ Xem trước</button><Status text={msg} /><div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map(r => <tr key={r.maNv}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc}</td><td>{r.tong}</td></tr>)}</tbody></table></div></div> }
 function MonthOvertimeScreen({ session }) { const [data, setData] = useState(null), [thang, setThang] = useState(monthNow()), [msg, setMsg] = useState(''); async function load() { try { setData(await api('getBangTangCaThang', [thang, session.boPhan])); setMsg('') } catch (e) { setMsg(e.message) } } return <div className="card"><label className="field-label">Chọn tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div style={{ height: 12 }} /><button className="primary-button" onClick={load}>Xem dữ liệu</button><Status text={msg} ok={false} />{data && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr>{(data.headers || []).map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={i}>{(data.headers || []).map((h, j) => <td key={h}>{Array.isArray(r) ? r[j] : r[h]}</td>)}</tr>)}</tbody></table></div>}</div> }
 function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'bang-thang') return <MonthOvertimeScreen session={session} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
-function App() { const [screen, setScreen] = useState('login'), [departments, setDepartments] = useState(fallbackDepartments), [session, setSession] = useState(null), [cache, setCache] = useState(() => readJson(CACHE_KEY, null)), [syncCount, setSyncCount] = useState(() => readJson(OFFLINE_QUEUE_KEY, []).length)
+function App() {
+  const [booting, setBooting] = useState(true)
+  const [bootText, setBootText] = useState('Đang tải dữ liệu gốc...')
+  const [screen, setScreen] = useState('login')
+  const [departments, setDepartments] = useState(() => readJson(BOOT_KEY, null)?.boPhanList || fallbackDepartments)
+  const [session, setSession] = useState(null)
+  const [cache, setCache] = useState(() => readJson(CACHE_KEY, null))
+  const [syncCount, setSyncCount] = useState(() => readJson(OFFLINE_QUEUE_KEY, []).length)
+
+  useEffect(() => {
+    let alive = true
+    async function boot() {
+      const cachedBoot = readJson(BOOT_KEY, null)
+      if (cachedBoot?.boPhanList?.length) {
+        setDepartments(cachedBoot.boPhanList)
+        setBootText('Đã có cache, đang kiểm tra dữ liệu mới...')
+      }
+      const last = readJson(LAST_DEPT_KEY, '')
+      try {
+        const init = await api('getLoginInitFast')
+        if (!alive) return
+        writeJson(BOOT_KEY, init)
+        setDepartments(init.boPhanList || fallbackDepartments)
+        if (last) {
+          setBootText('Đang tải sẵn dữ liệu bộ phận gần nhất...')
+          preloadTodayData(last).then(data => { if (data?.cache) setCache({ ...data.cache, today: data }) }).catch(() => {})
+        }
+      } catch {
+        setBootText('Đang dùng dữ liệu đã lưu trên máy...')
+      } finally {
+        setTimeout(() => { if (alive) setBooting(false) }, cachedBoot ? 180 : 350)
+      }
+    }
+    boot()
+    return () => { alive = false }
+  }, [])
+
   useEffect(() => { const run = () => syncQueue().then(() => setSyncCount(readJson(OFFLINE_QUEUE_KEY, []).length)); window.addEventListener('online', run); const t = setInterval(run, 60000); return () => { window.removeEventListener('online', run); clearInterval(t) } }, [])
   function handleSession(info) { setSession(info); setScreen('home') }
   function logout() { clearJson(SESSION_KEY); setSession(null); setScreen('login') }
+  if (booting) return <div className="app-shell"><BootSplash text={bootText} /></div>
   if (screen === 'login') return <div className="app-shell"><LoginScreen departments={departments} setDepartments={setDepartments} setSession={handleSession} setCache={setCache} /></div>
   if (!session) return <div className="app-shell"><LoginScreen departments={departments} setDepartments={setDepartments} setSession={handleSession} setCache={setCache} /></div>
   if (screen === 'home') return <div className="app-shell"><HomeScreen onSelect={setScreen} syncCount={syncCount} session={session} onLogout={logout} /></div>
