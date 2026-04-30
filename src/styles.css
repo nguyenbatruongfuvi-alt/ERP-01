@@ -1699,3 +1699,17 @@ body { overflow: auto; }
   .modal-v23 .mini { min-width: 74px !important; height: 36px !important; font-size: 13px !important; }
   .modal-v23 .status-mini { min-width: 92px !important; }
 }
+
+/* ERP V30.25 SCROLL REAL FIX - UI LOCKED */
+html, body, #root { height:100% !important; min-height:100% !important; overflow:auto !important; position:static !important; touch-action:pan-y !important; overscroll-behavior-y:auto !important; }
+body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch !important; }
+.app-shell { min-height:100dvh !important; height:auto !important; max-height:none !important; overflow:visible !important; touch-action:pan-y !important; }
+.page, .home-screen, .login-screen { min-height:auto !important; max-height:none !important; overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-y !important; }
+.modal-overlay { position:fixed !important; inset:0 !important; overflow:hidden !important; align-items:stretch !important; touch-action:pan-y !important; overscroll-behavior-y:contain !important; }
+.modal-panel, .modal-panel.modal-v23 { width:100% !important; max-width:480px !important; height:100dvh !important; max-height:100dvh !important; min-height:0 !important; margin:0 auto !important; display:flex !important; flex-direction:column !important; overflow:hidden !important; touch-action:pan-y !important; overscroll-behavior-y:contain !important; }
+.modal-head-lite, .modal-head-green, .modal-fixed-top, .overtime-compact-grid, .transfer-target-box, .note-compact, .pick-section-row, .external-search-box, .savebar-lite { flex-shrink:0 !important; }
+.modal-v23 .pick-scroll-area, .pick-scroll-area { flex:1 1 0 !important; min-height:0 !important; height:auto !important; max-height:none !important; overflow-y:scroll !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-y !important; overscroll-behavior-y:contain !important; will-change:scroll-position !important; }
+.modal-v23 .pick-list-lite, .modal-v23 .external-results, .pick-list-lite, .external-results { overflow:visible !important; max-height:none !important; }
+.table-scroll, .summary-kpi-grid { overflow:auto !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-x pan-y !important; }
+.pick-row-lite, .person-info-lite, .pick-scroll-area .pick-row-lite, .pick-scroll-area .person-info-lite { touch-action:pan-y !important; }
+.row-actions-lite, .primary-button, .secondary-button, .mini, .status-mini, select, input, button { touch-action:manipulation !important; }
