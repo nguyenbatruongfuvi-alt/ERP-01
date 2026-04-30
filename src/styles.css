@@ -1174,3 +1174,234 @@ body,
   -webkit-overflow-scrolling: touch !important;
   touch-action: pan-x pan-y !important;
 }
+
+/* =====================================================
+   ERP V30.22 FINAL - MODAL LAYOUT + MOBILE SCROLL LOCK
+   Mục tiêu:
+   - Khớp thiết kế đã chốt: header, thống kê, 2 dòng nhóm, search, list, savebar.
+   - Chỉ vùng nội dung cuộn; nút lưu cố định dưới.
+   - Tăng ca/Biến động: chỉ Chọn/Đã chọn. Vắng mặt: Chọn/Đã chọn + Có phép/Không phép.
+   ===================================================== */
+html, body, #root { height: 100%; min-height: 100%; }
+body { overflow: hidden; }
+.app-shell { height: 100dvh; overflow: hidden; }
+.page, .home-screen, .login-screen { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+.modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999 !important;
+  background: #f8fafc !important;
+  display: flex !important;
+  align-items: stretch !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  touch-action: none !important;
+}
+
+.modal-panel {
+  width: 100% !important;
+  max-width: 480px !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  min-height: 0 !important;
+  margin: 0 auto !important;
+  border-radius: 0 !important;
+  background: #f8fafc !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  touch-action: auto !important;
+}
+
+.modal-head-lite {
+  flex: 0 0 auto !important;
+  min-height: 92px !important;
+  padding: 20px 16px 14px !important;
+  background: #fff !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  box-shadow: 0 5px 14px rgba(16,24,40,.08) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+.modal-head-lite b { font-size: 30px !important; line-height: 1.05 !important; font-weight: 900 !important; color: #101828 !important; }
+.modal-head-lite button {
+  width: 60px !important; height: 60px !important;
+  border-radius: 16px !important; background: #eef2f6 !important;
+  font-size: 36px !important; color: #000 !important;
+}
+
+.overtime-compact-grid {
+  flex: 0 0 auto !important;
+  display: grid !important;
+  grid-template-columns: 1fr 1fr .68fr !important;
+  gap: 8px !important;
+  padding: 14px 12px 8px !important;
+  background: #fff !important;
+}
+.overtime-compact-grid .field-label { margin: 0 0 6px !important; font-size: 18px !important; font-weight: 850 !important; }
+.overtime-compact-grid .form-control-sm { height: 52px !important; min-height: 52px !important; font-size: 18px !important; font-weight: 800 !important; border-radius: 14px !important; padding: 0 10px !important; }
+.overtime-hours-input { text-align: center !important; }
+
+.note-compact {
+  flex: 0 0 auto !important;
+  margin: 8px 12px !important;
+  padding: 10px 12px !important;
+  border-radius: 14px !important;
+  border: 1px solid #ffd28a !important;
+  background: #fff8e6 !important;
+  color: #101828 !important;
+  font-size: 18px !important;
+  font-weight: 850 !important;
+  line-height: 1.25 !important;
+}
+.note-mini { display: block !important; margin-top: 2px !important; color: #667085 !important; font-size: 14px !important; font-weight: 750 !important; }
+
+.pick-scroll-area {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
+  overscroll-behavior: contain !important;
+  padding: 0 12px 12px !important;
+  background: #f8fafc !important;
+}
+
+.pick-section-row {
+  min-height: 46px !important;
+  padding: 10px 0 !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 16px !important;
+  line-height: 1.2 !important;
+  color: #101828 !important;
+}
+.pick-section-row b { font-size: 16px !important; font-weight: 900 !important; white-space: nowrap !important; }
+.pick-section-row span { color: #667085 !important; font-size: 14px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+.pick-section-row em {
+  margin-left: auto !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  border-radius: 9px !important;
+  background: #dff5e8 !important;
+  color: #027a48 !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+  font-size: 16px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.external-search-box {
+  height: 52px !important;
+  margin: 10px 0 8px !important;
+  border: 1.5px solid #cfd8e3 !important;
+  border-radius: 12px !important;
+  background: #fff !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 0 10px !important;
+}
+.external-search-box .search-ico { font-size: 22px !important; color: #667085 !important; flex: 0 0 auto !important; }
+.external-search-box input {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  border: 0 !important;
+  outline: 0 !important;
+  padding: 0 !important;
+  font-size: 16px !important;
+  font-weight: 650 !important;
+  background: transparent !important;
+}
+.external-search-box button {
+  width: 36px !important; height: 36px !important;
+  border: 0 !important; border-radius: 10px !important;
+  background: #f2f4f7 !important; color: #667085 !important;
+  font-size: 22px !important;
+}
+
+.external-results, .pick-list-lite {
+  overflow: visible !important;
+  background: #fff !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 14px !important;
+  margin: 0 0 10px !important;
+}
+
+.pick-row-lite {
+  min-height: 78px !important;
+  padding: 11px 12px !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  background: #fff !important;
+}
+.pick-row-lite:last-child { border-bottom: 0 !important; }
+.pick-row-lite.selected { background: #eafff4 !important; border-left: 6px solid var(--color-primary) !important; padding-left: 8px !important; }
+.pick-row-lite.outside { background: #fff8ea !important; border-left: 6px solid #f59e0b !important; padding-left: 8px !important; }
+.pick-row-lite b { display: block !important; font-size: 21px !important; line-height: 1.12 !important; font-weight: 900 !important; color: #101828 !important; overflow-wrap: anywhere !important; }
+.small-text { margin-top: 4px !important; font-size: 15px !important; line-height: 1.2 !important; color: #667085 !important; font-weight: 750 !important; }
+
+.row-actions-lite {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+  flex-wrap: nowrap !important;
+}
+.row-actions-lite .mini,
+.mini {
+  width: auto !important;
+  min-width: 78px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  padding: 0 10px !important;
+  border-radius: 13px !important;
+  font-size: 16px !important;
+  font-weight: 850 !important;
+  white-space: nowrap !important;
+}
+.row-actions-lite .status-mini,
+.status-mini {
+  min-width: 108px !important;
+  max-width: 126px !important;
+  background: #fff !important;
+  color: #101828 !important;
+  border: 1px solid #d0d5dd !important;
+  box-shadow: none !important;
+}
+.selected-mini {
+  background: #e4fbef !important;
+  color: #027a48 !important;
+  border: 1px solid #b7e4c9 !important;
+}
+
+.savebar-lite {
+  flex: 0 0 auto !important;
+  padding: 10px 14px calc(12px + env(safe-area-inset-bottom)) !important;
+  background: #fff !important;
+  border-top: 1px solid #e5e7eb !important;
+}
+.savebar-lite .primary-button { height: 58px !important; border-radius: 16px !important; font-size: 21px !important; font-weight: 900 !important; }
+
+.table-scroll, .summary-kpi-grid { overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; touch-action: pan-x pan-y !important; }
+
+@media (max-width: 380px) {
+  .modal-head-lite b { font-size: 28px !important; }
+  .pick-row-lite b { font-size: 19px !important; }
+  .small-text { font-size: 14px !important; }
+  .row-actions-lite .mini, .mini { min-width: 72px !important; font-size: 15px !important; padding: 0 8px !important; }
+  .row-actions-lite .status-mini, .status-mini { min-width: 100px !important; max-width: 112px !important; }
+  .pick-row-lite { grid-template-columns: minmax(0, 1fr) auto !important; gap: 6px !important; }
+}
