@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v35-app-true-smart-sync';
+const CACHE_NAME = 'erp-v30-ui-shell-v36-no-overtime-preselect';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {

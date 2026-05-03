@@ -7,9 +7,9 @@ const API_KEY = ''
 const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
 const CACHE_KEY = 'erp_v30_client_cache'
-const DRAFT_PREFIX = 'erp_v30_draft_v12'
+const DRAFT_PREFIX = 'erp_v30_draft_v13'
 const LOCAL_SAVE_PREFIX = 'erp_v30_local_first_v27'
-const PRELOAD_PREFIX = 'erp_v30_today_preload_v27'
+const PRELOAD_PREFIX = 'erp_v30_today_preload_v28'
 const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
@@ -655,7 +655,7 @@ function normalizeRow(row) {
 function mergeBundleRows(bundle, staff, session, type, title) {
   const cacheRows = bundle?.cache?.nhanSuBoPhan || staff || []
   const bundleRows = (bundle?.items || []).map(normalizeRow)
-  const saved = bundleRows.filter(x => x.selected === true)
+  const saved = bundleRows.filter(x => x.selected === true && (type !== 'Tăng ca' || x.batDau || x.ketThuc || x.soGio))
   const savedMap = new Map(saved.map(x => [x.maNv, x]))
   const hasSavedBefore = bundle?.hasSavedBefore === true || saved.length > 0
 
@@ -666,6 +666,12 @@ function mergeBundleRows(bundle, staff, session, type, title) {
   const baseSet = new Set(base.map(x => x.maNv))
   saved.forEach(x => { if (!baseSet.has(x.maNv)) base.push({ ...x, selected: true, outside: true }) })
 
+  // Riêng Tăng ca: nếu chưa có dữ liệu đã lưu thật sự kèm giờ tăng ca,
+  // không lấy trạng thái chọn từ cache/draft cũ để tránh mở ra bị chọn sẵn toàn bộ.
+  if (type === 'Tăng ca' && !hasSavedBefore) {
+    return { rows: base.map(p => ({ ...p, selected: false, trangThai: '' })), batDau: '', ketThuc: '', soGio: '', hasSavedBefore: false }
+  }
+
   const localDraft = readJson(draftKeyFor(session, type, title), null)
   if (!hasSavedBefore && localDraft && Array.isArray(localDraft.items)) {
     const draftMap = new Map(localDraft.items.map(x => [x.maNv, x]))
@@ -674,7 +680,6 @@ function mergeBundleRows(bundle, staff, session, type, title) {
   }
 
   // Không tự động chọn sẵn nhân viên cho mục Tăng ca.
-  // Khi chưa có dữ liệu đã lưu, tất cả nhân viên để selected=false để người dùng tự chọn.
   const first = saved.find(x => x.batDau || x.ketThuc || x.soGio) || saved[0] || {}
   // Luôn đưa người đã lưu/đã chọn lên đầu để mở lại nhìn thấy ngay.
   const selectedOrder = new Set(saved.filter(x => x.selected !== false).map(x => x.maNv))
