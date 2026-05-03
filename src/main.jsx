@@ -13,6 +13,8 @@ const PRELOAD_PREFIX = 'erp_v30_today_preload_v27'
 const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
+const SMART_REFRESH_MS = 60 * 1000
+let SYNC_QUEUE_RUNNING = false
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -198,20 +200,31 @@ function updateQueuedItem(id, patch) {
 async function syncQueue() {
   let q = readJson(OFFLINE_QUEUE_KEY, [])
   if (!q.length || !navigator.onLine) return 0
+  if (SYNC_QUEUE_RUNNING) return 0
+  SYNC_QUEUE_RUNNING = true
   let synced = 0
   const remain = []
-  for (const item of q) {
-    try {
-      updateQueuedItem(item.id, { status: 'syncing', tries: Number(item.tries || 0) + 1 })
-      await api(item.action, item.args)
-      synced += 1
-    } catch (e) {
-      remain.push({ ...item, status: 'error', error: e?.message || 'Chưa đồng bộ được', tries: Number(item.tries || 0) + 1, updatedAt: new Date().toISOString() })
+  try {
+    for (const item of q) {
+      try {
+        updateQueuedItem(item.id, { status: 'syncing', tries: Number(item.tries || 0) + 1 })
+        await api(item.action, item.args)
+        synced += 1
+      } catch (e) {
+        remain.push({ ...item, status: 'error', error: e?.message || 'Chưa đồng bộ được', tries: Number(item.tries || 0) + 1, updatedAt: new Date().toISOString() })
+      }
     }
+    writeJson(OFFLINE_QUEUE_KEY, remain)
+    window.dispatchEvent(new Event('erp-queue-change'))
+    if (synced > 0) {
+      const lastDept = readJson(LAST_DEPT_KEY, '')
+      if (lastDept) refreshTodayData(lastDept).catch(() => {})
+      if (lastDept) smartRefreshCompanyReport(lastDept, { force: true }).catch(() => {})
+    }
+    return synced
+  } finally {
+    SYNC_QUEUE_RUNNING = false
   }
-  writeJson(OFFLINE_QUEUE_KEY, remain)
-  window.dispatchEvent(new Event('erp-queue-change'))
-  return synced
 }
 function getLocalCount(boPhan, loai, title) {
   const pre = getPreloadedToday(boPhan)
@@ -338,6 +351,19 @@ function saveCompanyReportCache(data, ngay = today(), boPhan = '') {
     }
   }
   writeJson(UNIFIED_COMPANY_CACHE_KEY, unified)
+}
+async function smartRefreshCompanyReport(boPhan = '', opts = {}) {
+  if (!navigator.onLine) return findCompanyReportCache(today())?.data || null
+  const local = findCompanyReportCache(today())
+  const isFresh = local?.cachedAt && Date.now() - Number(local.cachedAt || 0) < COMPANY_CACHE_TTL_MS
+  if (local?.data && isFresh && !opts.force) return local.data
+  const data = await api('getBaoCaoTongCongTy', [today()])
+  const next = normalizeCompanyReport(data)
+  if (next) {
+    saveCompanyReportCache(next, today(), boPhan || readJson(LAST_DEPT_KEY, ''))
+    window.dispatchEvent(new CustomEvent('erp-company-report-updated', { detail: next }))
+  }
+  return next
 }
 function queueSummary() {
   const q = readJson(OFFLINE_QUEUE_KEY, [])
@@ -528,28 +554,42 @@ function CompanyScreen({ session }) {
   const [data, setData] = useState(() => initialCache?.data || defaultCompanyData)
   const [msg, setMsg] = useState(() => initialCache?.data ? '⚡ Đang hiển thị dữ liệu đã lưu trên máy.' : '')
   useEffect(() => {
-    const local = findCompanyReportCache(today())
-    if (local?.data) {
-      setData(local.data)
-      setMsg('⚡ Đang hiển thị dữ liệu đã lưu trên máy.')
+    const loadLocal = () => {
+      const local = findCompanyReportCache(today())
+      if (local?.data) {
+        setData(local.data)
+        setMsg('⚡ Đang hiển thị dữ liệu đã lưu trên máy.')
+      }
+      return local
     }
+    const local = loadLocal()
+    const onUpdated = (event) => {
+      if (event?.detail) {
+        setData(event.detail)
+        setMsg('✅ Đã cập nhật báo cáo công ty.')
+      } else {
+        loadLocal()
+      }
+    }
+    window.addEventListener('erp-company-report-updated', onUpdated)
 
     if (!navigator.onLine) {
       if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.')
-      return
+      return () => window.removeEventListener('erp-company-report-updated', onUpdated)
     }
 
-    // Nếu cache còn mới thì KHÔNG gọi API nữa. Màn hình mở ra tức thì, không chờ tải.
-    const isFresh = local?.cachedAt && Date.now() - Number(local.cachedAt || 0) < COMPANY_CACHE_TTL_MS
-    if (local?.data && isFresh) return
-
-    // Nếu cache đã có nhưng cũ, cập nhật API ở nền. UI vẫn đang hiển thị cache ngay.
-    api('getBaoCaoTongCongTy', [today()]).then(r => {
-      const next = r || defaultCompanyData
-      setData(next)
-      saveCompanyReportCache(next, today(), session?.boPhan || readJson(LAST_DEPT_KEY, ''))
-      setMsg('✅ Đã cập nhật báo cáo công ty.')
-    }).catch(e => { if (!local?.data) setMsg(e.message) })
+    smartRefreshCompanyReport(session?.boPhan || readJson(LAST_DEPT_KEY, '')).catch(e => { if (!local?.data) setMsg(e.message) })
+    const onFocus = () => smartRefreshCompanyReport(session?.boPhan || readJson(LAST_DEPT_KEY, '')).catch(() => {})
+    const onOnline = () => smartRefreshCompanyReport(session?.boPhan || readJson(LAST_DEPT_KEY, ''), { force: true }).catch(() => {})
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('online', onOnline)
+    const t = setInterval(() => smartRefreshCompanyReport(session?.boPhan || readJson(LAST_DEPT_KEY, '')).catch(() => {}), SMART_REFRESH_MS)
+    return () => {
+      window.removeEventListener('erp-company-report-updated', onUpdated)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('online', onOnline)
+      clearInterval(t)
+    }
   }, [session?.boPhan])
   const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
   return <><div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
@@ -999,6 +1039,22 @@ function App() {
     run()
     return () => { window.removeEventListener('online', run); window.removeEventListener('focus', run); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('erp-queue-change', updateCount); clearInterval(t) }
   }, [])
+
+  useEffect(() => {
+    if (!session?.boPhan) return
+    const run = () => {
+      if (!navigator.onLine) return
+      preloadTodayData(session.boPhan).then(data => { const merged = applyPreloadToCache(session.boPhan, data); if (merged) setCache(merged) }).catch(() => {})
+      smartRefreshCompanyReport(session.boPhan).catch(() => {})
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') run() }
+    window.addEventListener('focus', run)
+    window.addEventListener('online', run)
+    document.addEventListener('visibilitychange', onVisible)
+    const t = setInterval(run, SMART_REFRESH_MS)
+    run()
+    return () => { window.removeEventListener('focus', run); window.removeEventListener('online', run); document.removeEventListener('visibilitychange', onVisible); clearInterval(t) }
+  }, [session?.boPhan])
   function handleSession(info) { setSession(info); setScreen('home') }
   function logout() { clearJson(SESSION_KEY); setSession(null); setScreen('login') }
   if (booting) return <div className="app-shell"><BootSplash text={bootText} /></div>
