@@ -1,0 +1,72 @@
+// ERP V30.26 - Apps Script bổ sung cho giao việc + xuất Excel
+// Dán các hàm này vào Apps Script hiện tại.
+// Nếu project đang có router action riêng, thêm 3 action:
+// getDanhSachToTruong, saveGiaoViec, exportTangCaExcel
+
+function getDanhSachToTruong() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName('TAI_KHOAN') || ss.getSheetByName('LOGIN') || ss.getSheets()[0];
+  const values = sh.getDataRange().getValues();
+  if (values.length < 2) return [];
+  const headers = values[0].map(String);
+  const idx = (name) => headers.findIndex(h => String(h).trim().toUpperCase() === name);
+  const iBoPhan = idx('BO_PHAN');
+  const iTen = idx('TEN_TO_TRUONG');
+  const iVaiTro = idx('VAI_TRO');
+  const iTrangThai = idx('TRANG_THAI');
+  return values.slice(1).filter(r => {
+    const role = String(r[iVaiTro] || '').toLowerCase();
+    const st = iTrangThai >= 0 ? String(r[iTrangThai] || '').toLowerCase() : 'làm việc';
+    return role.includes('tổ trưởng') || role.includes('to truong') && !st.includes('nghỉ');
+  }).map(r => ({
+    maNv: String(r[iTen] || '').trim(),
+    tenNv: String(r[iTen] || '').trim(),
+    boPhan: String(r[iBoPhan] || '').trim(),
+    vaiTro: 'Tổ trưởng'
+  })).filter(x => x.tenNv);
+}
+
+function saveGiaoViec(payload) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName('GIAO_VIEC');
+  if (!sh) {
+    sh = ss.insertSheet('GIAO_VIEC');
+    sh.appendRow(['REQUEST_ID','NGAY_GIAO','NGUOI_GIAO','BO_PHAN_NGUOI_GIAO','GIAO_CHO_MA_NV','GIAO_CHO_TEN','GIAO_CHO_BO_PHAN','TEN_CONG_VIEC','NOI_DUNG','HAN_HOAN_THANH','TRANG_THAI','CREATED_AT']);
+  }
+  const requestId = String(payload.requestId || '');
+  if (requestId) {
+    const ids = sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 0), 1).getValues().flat().map(String);
+    if (ids.includes(requestId)) return { ok: true, duplicate: true, savedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm:ss') };
+  }
+  sh.appendRow([
+    requestId,
+    payload.ngayGiao || '',
+    payload.nguoiGiao || '',
+    payload.boPhanNguoiGiao || '',
+    payload.giaoChoMaNv || '',
+    payload.giaoChoTen || '',
+    payload.giaoChoBoPhan || '',
+    payload.tenCongViec || '',
+    payload.noiDung || '',
+    payload.hanHoanThanh || '',
+    payload.trangThai || 'Đang chờ',
+    new Date()
+  ]);
+  return { ok: true, savedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm:ss') };
+}
+
+function exportTangCaExcel(filter) {
+  filter = filter || {};
+  const ss = SpreadsheetApp.getActive();
+  const source = ss.getSheetByName('TANG_CA') || ss.getSheetByName('TANG CA') || ss.getSheetByName('NHAP_LIEU') || ss.getSheets()[0];
+  const values = source.getDataRange().getValues();
+  const name = 'TangCa_' + (filter.boPhan || 'TatCa') + '_' + (filter.tuNgay || filter.thang || '').replace(/[\/]/g, '-') + '_' + Date.now();
+  const out = SpreadsheetApp.create(name);
+  const sh = out.getSheets()[0];
+  sh.setName('Tang ca');
+  if (values.length) sh.getRange(1, 1, values.length, values[0].length).setValues(values);
+  const file = DriveApp.getFileById(out.getId());
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const url = 'https://docs.google.com/spreadsheets/d/' + out.getId() + '/export?format=xlsx';
+  return { ok: true, url: url, fileUrl: out.getUrl(), fileId: out.getId(), name: name };
+}

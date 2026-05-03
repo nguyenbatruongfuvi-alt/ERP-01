@@ -1713,3 +1713,117 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
 .table-scroll, .summary-kpi-grid { overflow:auto !important; -webkit-overflow-scrolling:touch !important; touch-action:pan-x pan-y !important; }
 .pick-row-lite, .person-info-lite, .pick-scroll-area .pick-row-lite, .pick-scroll-area .person-info-lite { touch-action:pan-y !important; }
 .row-actions-lite, .primary-button, .secondary-button, .mini, .status-mini, select, input, button { touch-action:manipulation !important; }
+
+/* =========================
+   ERP V30.26 LOCAL-FIRST + LOCKED UI FIX
+   - Save button color states
+   - In tăng ca restored
+   - Giao việc manager form
+   ========================= */
+.primary-button.save-state-saving {
+  background: linear-gradient(180deg, #f79009, #dc6803) !important;
+  box-shadow: 0 8px 18px rgba(247, 144, 9, .22) !important;
+}
+.primary-button.save-state-saved {
+  background: linear-gradient(180deg, #027a48, #05603a) !important;
+  box-shadow: 0 8px 18px rgba(2, 122, 72, .22) !important;
+}
+.primary-button.save-state-offline {
+  background: linear-gradient(180deg, #1570ef, #175cd3) !important;
+  box-shadow: 0 8px 18px rgba(21, 112, 239, .22) !important;
+}
+.primary-button.save-state-error {
+  background: linear-gradient(180deg, #d92d20, #b42318) !important;
+  box-shadow: 0 8px 18px rgba(217, 45, 32, .22) !important;
+}
+.screen-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 4px 18px;
+}
+.screen-title-row h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 900;
+  color: var(--color-text);
+}
+.screen-title-icon {
+  width: 48px;
+  flex: 0 0 48px;
+  text-align: center;
+  font-size: 34px;
+}
+.date-range-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.print-overtime-card .form-control-sm,
+.task-form-card .form-control-sm {
+  min-height: 50px !important;
+  font-size: 18px !important;
+  font-weight: 650 !important;
+}
+.export-button {
+  background: linear-gradient(180deg, #079455, #027a48) !important;
+}
+.excel-link-box {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #f8fafc;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+.textarea-wrap {
+  position: relative;
+}
+.task-textarea {
+  min-height: 138px !important;
+  height: 138px !important;
+  padding-top: 12px !important;
+  padding-bottom: 30px !important;
+  resize: none;
+  line-height: 1.35;
+}
+.textarea-wrap span {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+@media (max-width: 420px) {
+  .screen-title-row h1 { font-size: 28px; }
+  .date-range-grid { gap: 8px; }
+  .print-overtime-card .form-control-sm,
+  .task-form-card .form-control-sm { font-size: 16px !important; }
+}
+
+/* =========================
+   ERP V30.27 PRODUCTION LOCAL-FIRST STATES
+   Giữ nguyên giao diện; chỉ làm trạng thái lưu rõ hơn.
+   ========================= */
+.primary-button.save-state-saving {
+  background: linear-gradient(180deg, #f79009, #dc6803) !important;
+  box-shadow: 0 8px 18px rgba(247, 144, 9, .24) !important;
+}
+.primary-button.save-state-saved {
+  background: linear-gradient(180deg, #12b76a, #027a48) !important;
+  box-shadow: 0 8px 18px rgba(18, 183, 106, .22) !important;
+}
+.primary-button.save-state-offline {
+  background: linear-gradient(180deg, #1570ef, #175cd3) !important;
+  box-shadow: 0 8px 18px rgba(21, 112, 239, .22) !important;
+}
+.primary-button.save-state-error {
+  background: linear-gradient(180deg, #d92d20, #b42318) !important;
+  box-shadow: 0 8px 18px rgba(217, 45, 32, .22) !important;
+}
+.retention b { font-weight: 900; }

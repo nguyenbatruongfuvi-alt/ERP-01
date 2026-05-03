@@ -8,7 +8,8 @@ const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
 const CACHE_KEY = 'erp_v30_client_cache'
 const DRAFT_PREFIX = 'erp_v30_draft_v12'
-const PRELOAD_PREFIX = 'erp_v30_today_preload_v18'
+const LOCAL_SAVE_PREFIX = 'erp_v30_local_first_v27'
+const PRELOAD_PREFIX = 'erp_v30_today_preload_v27'
 const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
@@ -45,7 +46,7 @@ function personSearchText(p) {
 const menuGroups = [
   { title: 'BÁO CÁO', items: [{ id: 'bao-cao', icon: '📋', label: 'Báo cáo bộ phận' }, { id: 'tong-cty', icon: '📊', label: 'Báo cáo công ty' }] },
   { title: 'NHẬP LIỆU', items: [{ id: 'tang-ca', icon: '🕒', label: 'Tăng ca' }, { id: 'bien-dong', icon: '👥', label: 'Biến động' }, { id: 'vang', icon: '🧾', label: 'Vắng mặt' }, { id: 'giao-viec', icon: '📝', label: 'Giao việc' }] },
-  { title: 'TIỆN ÍCH', items: [{ id: 'in-tang-ca', icon: '🖨️', label: 'In tăng ca' }, { id: 'bang-thang', icon: '🔢', label: 'Bảng tăng ca' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
+  { title: 'TIỆN ÍCH', items: [{ id: 'in-tang-ca', icon: '🖨️', label: 'In tăng ca' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
 ]
 
 function markOfflineError(err) {
@@ -163,21 +164,86 @@ async function preloadTodayData(boPhan, opts = {}) {
   if (!navigator.onLine) return cached
   return refreshTodayData(boPhan)
 }
-function queueSave(action, args) {
+function localKey(kind, parts = []) { return `${LOCAL_SAVE_PREFIX}_${kind}_${parts.filter(Boolean).join('_')}` }
+function queueSave(action, args, meta = {}) {
   const q = readJson(OFFLINE_QUEUE_KEY, [])
-  q.push({ id: Date.now() + '-' + Math.random().toString(16).slice(2), action, args, time: new Date().toISOString() })
+  const requestId = meta.requestId || args?.[0]?.requestId || Date.now() + '-' + Math.random().toString(16).slice(2)
+  const exists = q.some(x => x.requestId === requestId || x.id === requestId)
+  if (!exists) q.push({ id: requestId, requestId, action, args, status: 'pending', tries: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), meta })
   writeJson(OFFLINE_QUEUE_KEY, q)
+  window.dispatchEvent(new Event('erp-queue-change'))
   return q.length
 }
-async function syncQueue() {
+function updateQueuedItem(id, patch) {
   const q = readJson(OFFLINE_QUEUE_KEY, [])
+  writeJson(OFFLINE_QUEUE_KEY, q.map(x => (x.id === id || x.requestId === id) ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x))
+  window.dispatchEvent(new Event('erp-queue-change'))
+}
+async function syncQueue() {
+  let q = readJson(OFFLINE_QUEUE_KEY, [])
   if (!q.length || !navigator.onLine) return 0
+  let synced = 0
   const remain = []
   for (const item of q) {
-    try { await api(item.action, item.args) } catch { remain.push(item) }
+    try {
+      updateQueuedItem(item.id, { status: 'syncing', tries: Number(item.tries || 0) + 1 })
+      await api(item.action, item.args)
+      synced += 1
+    } catch (e) {
+      remain.push({ ...item, status: 'error', error: e?.message || 'Chưa đồng bộ được', tries: Number(item.tries || 0) + 1, updatedAt: new Date().toISOString() })
+    }
   }
   writeJson(OFFLINE_QUEUE_KEY, remain)
-  return q.length - remain.length
+  window.dispatchEvent(new Event('erp-queue-change'))
+  return synced
+}
+function getLocalCount(boPhan, loai, title) {
+  const pre = getPreloadedToday(boPhan)
+  return Number(pre?.counts?.[loai]?.[title] || 0)
+}
+function saveLocalNhapLieu(session, type, title, payload) {
+  const loai = payload.loaiBaoCao || loaiForType(type)
+  const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {}, cache: readJson(CACHE_KEY, null) || {} }
+  old.counts = old.counts || {}; old.counts[loai] = old.counts[loai] || {}
+  old.counts[loai][title] = (payload.items || []).length
+  old.bundles = old.bundles || {}; old.bundles[loai] = old.bundles[loai] || {}
+  old.bundles[loai][title] = {
+    hasSavedBefore: true,
+    items: (payload.items || []).map(x => ({ ...x, selected: true, batDau: payload.batDau || '', ketThuc: payload.ketThuc || '', soGio: payload.soGio || '' })),
+    batDau: payload.batDau || '', ketThuc: payload.ketThuc || '', soGio: payload.soGio || '',
+    localOnly: true, savedAt: new Date().toISOString()
+  }
+  setPreloadedToday(session.boPhan, old)
+  applyPreloadToCache(session.boPhan, old)
+  writeJson(localKey('nhaplieu', [today(), session.boPhan, type, title]), payload)
+}
+
+function saveLocalBaoCaoTong(session, payload) {
+  const key = localKey('bao_cao_tong', [payload.ngay, session.boPhan])
+  writeJson(key, { ...payload, localOnly: true, savedAt: new Date().toISOString() })
+  const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {}, cache: readJson(CACHE_KEY, null) || {} }
+  old.baoCaoTong = { ...(old.baoCaoTong || {}), [session.boPhan]: payload }
+  setPreloadedToday(session.boPhan, old)
+  applyPreloadToCache(session.boPhan, old)
+}
+function saveLocalGiaoViec(session, payload) {
+  const key = localKey('giaoviec_view', [payload.giaoChoBoPhan || session.boPhan])
+  const list = readJson(key, [])
+  writeJson(key, [{ ...payload, localOnly: true, synced: false }, ...list.filter(x => x.requestId !== payload.requestId)])
+  writeJson(localKey('giaoviec_sent', [session.boPhan]), [{ ...payload, localOnly: true, synced: false }, ...readJson(localKey('giaoviec_sent', [session.boPhan]), []).filter(x => x.requestId !== payload.requestId)].slice(0, 200))
+}
+function queueSummary() {
+  const q = readJson(OFFLINE_QUEUE_KEY, [])
+  const error = q.filter(x => x.status === 'error').length
+  const syncing = q.filter(x => x.status === 'syncing').length
+  const pending = q.length - error - syncing
+  return { total: q.length, pending, syncing, error }
+}
+function networkStateText() {
+  const q = queueSummary()
+  if (!q.total) return 'Đã đồng bộ'
+  if (q.error) return `Chờ đồng bộ: ${q.total} / lỗi: ${q.error}`
+  return `Chờ đồng bộ: ${q.total}`
 }
 
 function MenuContent({ onSelect, syncCount, onLogout }) {
@@ -187,7 +253,7 @@ function MenuContent({ onSelect, syncCount, onLogout }) {
       {group.items.map(item => <div className="menu-item" key={item.id} onClick={() => onSelect(item.id)}><span className="menu-icon">{item.icon}</span><span>{item.label}</span></div>)}
     </div>)}
     {onLogout && <button className="logout-button" onClick={onLogout}>↩ Đăng xuất / Đăng nhập lại</button>}
-    <div className="retention">Dữ liệu được lưu trữ tối đa<br /><b>45 ngày gần nhất</b>{syncCount > 0 && <><br /><b>Chờ đồng bộ: {syncCount}</b></>}</div>
+    <div className="retention">Dữ liệu lưu trên máy trước<br /><b>45 ngày gần nhất</b>{syncCount > 0 && <><br /><b>{networkStateText()}</b></>}</div>
   </div>
 }
 
@@ -280,10 +346,11 @@ function SideMenu({ open, onClose, onSelect, syncCount, onLogout }) { return <><
 function Chrome({ setScreen, session, children, syncCount, onLogout }) { return <><AppHeader session={session} onMenu={() => setScreen('home')} /><main className="page">{children}</main></> }
 function Status({ text, ok = true }) { return text ? <div className={`msg ${ok ? 'ok' : 'err'}`}>{text}</div> : null }
 function saveStateFromMsg(msg, saving) {
-  if (saving || String(msg || '').includes('Đang lưu')) return 'saving'
-  if (String(msg || '').includes('ĐÃ LƯU') || String(msg || '').includes('THÀNH CÔNG')) return 'saved'
-  if (String(msg || '').includes('Offline') || String(msg || '').includes('lưu tạm')) return 'offline'
-  if (String(msg || '').includes('CHƯA LƯU') || String(msg || '').includes('Lỗi') || String(msg || '').includes('lỗi')) return 'error'
+  const text = String(msg || '')
+  if (saving || text.includes('Đang lưu') || text.includes('Đang đồng bộ') || text.includes('Đang tạo')) return 'saving'
+  if (text.includes('CHƯA LƯU') || text.includes('Chưa') || text.includes('Lỗi') || text.includes('lỗi') || text.includes('❌')) return 'error'
+  if (text.includes('Offline') || text.includes('offline') || text.includes('chờ đồng bộ') || text.includes('lưu tạm') || text.includes('Sẽ tự đồng bộ')) return 'offline'
+  if (text.includes('ĐÃ ĐỒNG BỘ') || text.includes('THÀNH CÔNG') || text.includes('ĐÃ LƯU') || text.includes('Đã lưu')) return 'saved'
   return 'idle'
 }
 function saveButtonClass(base, msg, saving) { return `${base} save-state-${saveStateFromMsg(msg, saving)}` }
@@ -294,20 +361,21 @@ function BootSplash({ text = 'Đang tải dữ liệu gốc...' }) {
 function ReportScreen({ session }) {
   const [data, setData] = useState(null), [form, setForm] = useState({ tongCongNhan: '', coMat: '', ghiChu: '' }), [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
-  useEffect(() => { api('getBaoCaoTong', [today(), session.boPhan]).then(r => { setData(r); setForm({ tongCongNhan: r.TONG_CONG_NHAN || '', coMat: r.CO_MAT || '', ghiChu: r.GHI_CHU || '' }) }).catch(e => setMsg(e.message)) }, [session.boPhan])
+  useEffect(() => { const local = readJson(localKey('bao_cao_tong', [today(), session.boPhan]), null); if (local) { setForm({ tongCongNhan: local.tongCongNhan || '', coMat: local.coMat || '', ghiChu: local.ghiChu || '' }); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } api('getBaoCaoTong', [today(), session.boPhan]).then(r => { setData(r); if (!local) setForm({ tongCongNhan: r.TONG_CONG_NHAN || '', coMat: r.CO_MAT || '', ghiChu: r.GHI_CHU || '' }) }).catch(e => { if (!local) setMsg(e.message) }) }, [session.boPhan])
   const rows = [['Tổng công nhân', form.tongCongNhan || 0, 'var(--color-blue)'], ['Có mặt', form.coMat || 0, 'var(--color-green)'], ['Vắng sáng', data?.VANG_BUOI_SANG || 0, 'var(--color-orange)'], ['Vắng chiều', data?.VANG_BUOI_CHIEU || 0, 'var(--color-orange)'], ['Vắng cả ngày', data?.VANG_CA_NGAY || 0, 'var(--color-red)']]
   async function save() {
     if (saving) return
     const requestId = `bc_${Date.now()}_${Math.random().toString(16).slice(2)}`
     const payload = { requestId, ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, tongCongNhan: form.tongCongNhan, coMat: form.coMat, ghiChu: form.ghiChu }
-    setSaving(true); setMsg('⏳ Đang lưu dữ liệu...')
-    try {
-      const r = await api('saveBaoCaoTong', [payload])
-      setMsg(`✅ ĐÃ LƯU THÀNH CÔNG${r?.savedAt ? ' lúc ' + r.savedAt : ''}`)
-    } catch (e) {
-      if (e.offline) { const n = queueSave('saveBaoCaoTong', [payload]); setMsg(`📡 Offline thật: đã lưu tạm trên máy, chờ đồng bộ (${n}).`) }
-      else { setMsg(`❌ CHƯA LƯU: ${e.message || 'Lỗi Apps Script.'}`) }
-    } finally { setSaving(false) }
+    setSaving(true)
+    saveLocalBaoCaoTong(session, payload)
+    const n = queueSave('saveBaoCaoTong', [payload], { requestId, screen: 'bao-cao' })
+    setMsg(`💾 ĐÃ LƯU TRÊN MÁY. Đang đồng bộ nền (${n}).`)
+    setSaving(false)
+    if (navigator.onLine) syncQueue().then(() => {
+      const left = readJson(OFFLINE_QUEUE_KEY, []).length
+      setMsg(left ? `💾 Đã lưu trên máy. Còn ${left} mục chờ đồng bộ.` : '✅ ĐÃ ĐỒNG BỘ THÀNH CÔNG')
+    }).catch(() => setMsg('💾 Đã lưu trên máy. Sẽ tự đồng bộ khi mạng ổn.'))
   }
   return <div className="card">{rows.map(([label, number, color]) => <div className="kpi-row" key={label}><div className="kpi-label">{label}</div><div className="kpi-number" style={{ color }}>{number}</div></div>)}
     <label className="field-label">Tổng công nhân</label><input className="form-control form-control-sm" value={form.tongCongNhan} onChange={e => setForm({ ...form, tongCongNhan: e.target.value })} />
@@ -352,6 +420,8 @@ function DataEntryScreen({ type, items, session, cache }) {
     api('getCountsByLoai', [today(), session.boPhan, loai]).then(setCounts).catch(() => {})
   }, [type, session.boPhan])
   function refreshCounts() {
+    const pre = getPreloadedToday(session.boPhan)
+    if (pre?.counts?.[loai]) setCounts(pre.counts[loai])
     api('getCountsByLoai', [today(), session.boPhan, loai]).then(c => {
       setCounts(c)
       const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {} }
@@ -566,21 +636,18 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     const requestId = `nl_${Date.now()}_${Math.random().toString(16).slice(2)}`
     const payload = { requestId, localDraftAt: Date.now(), ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, chiTiet: title, items, batDau, ketThuc, soGio, loaiBaoCao, boPhanChuyenDen: isTransfer ? transferTarget.trim() : '', toChuyenDen: isTransfer ? transferTarget.trim() : '', ghiChu: isTransfer ? `Điều động sang ${transferTarget.trim()} - hiển thị tại tổ nhận là (hỗ trợ)` : '' }
     writeJson(draftKeyFor(session, type, title), payload)
-    setSaving(true); setMsg('⏳ Đang lưu dữ liệu...')
-    try {
-      const r = await api(type === 'Vắng mặt' ? 'saveChiTietVang' : 'saveNhapLieu', [payload])
-      setMsg(`✅ ĐÃ LƯU THÀNH CÔNG ${items.length} người${isTransfer ? ` sang ${transferTarget.trim()} (hỗ trợ)` : ''}${r?.savedAt ? ' lúc ' + r.savedAt : ''}`)
-      clearJson(draftKeyFor(session, type, title))
+    saveLocalNhapLieu(session, type, title, payload)
+    const action = type === 'Vắng mặt' ? 'saveChiTietVang' : 'saveNhapLieu'
+    const n = queueSave(action, [payload], { requestId, screen: type, title })
+    clearJson(draftKeyFor(session, type, title))
+    setSaving(false)
+    setMsg(`💾 ĐÃ LƯU TRÊN MÁY ${items.length} người. Đang đồng bộ nền (${n}).`)
+    onSaved?.()
+    if (navigator.onLine) syncQueue().then(() => {
+      const left = readJson(OFFLINE_QUEUE_KEY, []).length
+      setMsg(left ? `💾 Đã lưu trên máy. Còn ${left} mục chờ đồng bộ.` : `✅ ĐÃ ĐỒNG BỘ THÀNH CÔNG ${items.length} người${isTransfer ? ` sang ${transferTarget.trim()} (hỗ trợ)` : ''}`)
       onSaved?.()
-    } catch (e) {
-      if (e.offline) {
-        const n = queueSave(type === 'Vắng mặt' ? 'saveChiTietVang' : 'saveNhapLieu', [payload])
-        setMsg(`📡 Offline thật: đã lưu tạm trên máy, chờ đồng bộ (${n}).`)
-        onSaved?.()
-      } else {
-        setMsg(`❌ CHƯA LƯU: ${e.message || 'Lỗi Apps Script.'}`)
-      }
-    } finally { setSaving(false) }
+    }).catch(() => setMsg(`💾 Đã lưu trên máy. Sẽ tự đồng bộ khi mạng ổn.`))
   }
 
   const actionControls = (p) => <div className="row-actions-lite" onClick={e => e.stopPropagation()}>
@@ -618,7 +685,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       {inTeamOpen && <div className="pick-list-lite main-list-v23">{inTeamRows.map(p => renderPerson(p, 'in_'))}</div>}
       {outsideOpen && outsideRows.length > 0 && <div className="pick-list-lite outside-list-v23">{outsideRows.map(p => renderPerson(p, 'out_'))}</div>}
     </div>
-    <div className="savebar-lite"><button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : `Lưu (${selectedCount} nhân viên)`}</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('lỗi') && !msg.includes('Lỗi') && !msg.includes('CHƯA LƯU')} /></div></div></div>
+    <div className="savebar-lite"><button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ ĐỒNG BỘ') ? 'Đã đồng bộ' : msg.includes('ĐÃ LƯU TRÊN MÁY') || msg.includes('Đã lưu trên máy') ? 'Đã lưu trên máy' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : `Lưu (${selectedCount} nhân viên)`}</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('lỗi') && !msg.includes('Lỗi') && !msg.includes('CHƯA LƯU')} /></div></div></div>
 }
 
 function StaffScreen({ session, cache }) { const staff = useStaff(session, cache); return <div className="card"><div className="table-scroll"><table className="summary-table staff-table"><thead><tr><th>Mã NV</th><th>Tên NV</th><th>Bộ phận</th><th>Trạng thái</th></tr></thead><tbody>{staff.map(row => <tr key={row.maNv}><td>{row.maNv}</td><td>{row.tenNv}</td><td>{row.boPhan}</td><td>{row.trangThai}</td></tr>)}</tbody></table></div></div> }
@@ -627,10 +694,79 @@ function AccountScreen({ session, setSession }) {
   async function change() { if (newPass !== again) return setMsg('Mật khẩu nhập lại không khớp.'); try { const r = await api('doiMatKhau', [session.boPhan, oldPass, newPass]); setMsg(r.message || 'Đã đổi mật khẩu.'); setOldPass(''); setNewPass(''); setAgain('') } catch (e) { setMsg(e.message) } }
   return <><div className="card"><div className="section-label">Thông tin cá nhân</div><div className="meta-list account-info"><div className="meta-line">Bộ phận: <b>{session.boPhan}</b></div><div className="meta-line">Tổ Trưởng: <b>{session.tenToTruong}</b></div><div className="meta-line">Vai trò: <b>{session.roleLabel || session.vaiTro}</b></div><div className="meta-line">Ngày: <b>{session.today || today()}</b></div></div></div><div className="card"><div className="section-label">Đổi mật khẩu</div><label className="field-label">Mật khẩu cũ</label><input className="form-control form-control-sm" type="password" placeholder="Nhập mật khẩu cũ" value={oldPass} onChange={e => setOldPass(e.target.value)} /><label className="field-label">Mật khẩu mới</label><input className="form-control form-control-sm" type="password" placeholder="Tối thiểu 6 ký tự" value={newPass} onChange={e => setNewPass(e.target.value)} /><label className="field-label">Nhập lại mật khẩu mới</label><input className="form-control form-control-sm" type="password" placeholder="Nhập lại mật khẩu mới" value={again} onChange={e => setAgain(e.target.value)} /><div style={{ height: 12 }} /><button className="primary-button" onClick={change}>Cập nhật mật khẩu</button><Status text={msg} ok={!msg.includes('không') && !msg.includes('lỗi')} /></div></>
 }
-function TaskScreen({ session }) { const [jobs, setJobs] = useState([]); useEffect(() => { api('getDanhSachCongViec', [session.boPhan, session.vaiTro]).then(setJobs).catch(() => {}) }, [session]); return <div className="card">{jobs.length ? jobs.map((j, i) => <div className="task-card" key={i}><div className="task-title">{j.tieuDe || j.noiDung || 'Công việc'}</div><div className="meta-line">Trạng thái: <b>{j.trangThai || 'Đang chờ'}</b></div></div>) : <><p className="page-note">Danh sách công việc được giao.</p><div className="task-card"><div className="task-title">Chưa có công việc</div><div className="meta-line">Trạng thái: <b>Đang chờ</b></div></div></>}</div> }
-function PrintOvertimeScreen({ session, departments }) { const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả'), [thang, setThang] = useState(monthNow()); async function load() { try { const r = await api('getDanhSachTangCaXemTruoc', ['THEO_THANG', bp, '', '', thang]); setRows(r.rows || []); setMsg(r.message || '') } catch (e) { setMsg(e.message) } } return <div className="card"><div className="section-label">Bộ phận</div><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu 45 ngày gần nhất.</div><button className="secondary-button" onClick={load}>👁️ Xem trước</button><Status text={msg} /><div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map(r => <tr key={r.maNv}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc}</td><td>{r.tong}</td></tr>)}</tbody></table></div></div> }
-function MonthOvertimeScreen({ session }) { const [data, setData] = useState(null), [thang, setThang] = useState(monthNow()), [msg, setMsg] = useState(''); async function load() { try { setData(await api('getBangTangCaThang', [thang, session.boPhan])); setMsg('') } catch (e) { setMsg(e.message) } } return <div className="card"><label className="field-label">Chọn tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div style={{ height: 12 }} /><button className="primary-button" onClick={load}>Xem dữ liệu</button><Status text={msg} ok={false} />{data && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr>{(data.headers || []).map(h => <th key={h}>{h}</th>)}</tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={i}>{(data.headers || []).map((h, j) => <td key={h}>{Array.isArray(r) ? r[j] : r[h]}</td>)}</tr>)}</tbody></table></div>}</div> }
-function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'bang-thang') return <MonthOvertimeScreen session={session} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
+function isManagerRole(session) { return stripVietnamese(session?.vaiTro || session?.roleLabel || '').includes('quan ly') }
+function TaskScreen({ session }) {
+  const manager = isManagerRole(session)
+  const [jobs, setJobs] = useState([])
+  const [leaders, setLeaders] = useState([])
+  const [leaderId, setLeaderId] = useState('')
+  const [tenCongViec, setTenCongViec] = useState('')
+  const [noiDung, setNoiDung] = useState('')
+  const [han, setHan] = useState(() => today())
+  const [msg, setMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => {
+    if (manager) {
+      const boot = readJson(BOOT_KEY, null)
+      const cached = boot?.toTruongList || boot?.leaders || []
+      if (cached.length) { setLeaders(cached); setLeaderId(String(cached[0].maNv || cached[0].ma || cached[0].tenNv || cached[0].ten || '')) }
+      api('getDanhSachToTruong', []).then(list => {
+        const arr = list || []
+        setLeaders(arr)
+        if (arr.length) setLeaderId(String(arr[0].maNv || arr[0].ma || arr[0].tenNv || arr[0].ten || ''))
+      }).catch(() => {
+        if (!cached.length) {
+          const fallback = [{ tenNv: session.tenToTruong || 'Lưu Văn Hùng Anh', boPhan: session.boPhan || 'Ngâm Đường 2' }]
+          setLeaders(fallback); setLeaderId(fallback[0].tenNv)
+        }
+      })
+    } else {
+      const local = readJson(localKey('giaoviec_view', [session.boPhan]), [])
+      if (local.length) setJobs(local)
+      api('getDanhSachCongViec', [session.boPhan, session.vaiTro]).then(r => { setJobs(r || []); writeJson(localKey('giaoviec_view', [session.boPhan]), r || []) }).catch(() => {})
+    }
+  }, [session.boPhan, session.vaiTro])
+  function leaderLabel(x) { return `${x.tenNv || x.ten || x.name || ''}${x.boPhan || x.boPhanGoc ? ` (${x.boPhan || x.boPhanGoc})` : ''}`.trim() }
+  function resetForm() { setTenCongViec(''); setNoiDung(''); setHan(today()); setMsg('') }
+  function saveTask() {
+    if (saving) return
+    const leader = leaders.find(x => String(x.maNv || x.ma || x.tenNv || x.ten || '') === leaderId) || leaders[0]
+    if (!leader) return setMsg('Chưa có danh sách tổ trưởng.')
+    if (!tenCongViec.trim()) return setMsg('Vui lòng nhập tên công việc.')
+    if (!noiDung.trim()) return setMsg('Vui lòng nhập nội dung công việc.')
+    const requestId = `gv_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    const payload = { requestId, ngayGiao: today(), nguoiGiao: session.tenToTruong || session.ten || session.boPhan, boPhanNguoiGiao: session.boPhan, giaoChoMaNv: leader.maNv || leader.ma || '', giaoChoTen: leader.tenNv || leader.ten || leader.name || '', giaoChoBoPhan: leader.boPhan || leader.boPhanGoc || '', tenCongViec: tenCongViec.trim(), noiDung: noiDung.trim(), hanHoanThanh: han, trangThai: 'Đang chờ' }
+    writeJson(localKey('giaoviec_form_last', [session.boPhan]), payload)
+    saveLocalGiaoViec(session, payload)
+    const n = queueSave('saveGiaoViec', [payload], { requestId, screen: 'giao-viec' })
+    setMsg(`💾 ĐÃ LƯU TRÊN MÁY. Đang đồng bộ nền (${n}).`)
+    setSaving(false)
+    if (navigator.onLine) syncQueue().then(() => setMsg(readJson(OFFLINE_QUEUE_KEY, []).length ? '💾 Đã lưu trên máy, còn mục chờ đồng bộ.' : '✅ ĐÃ ĐỒNG BỘ GIAO VIỆC.')).catch(() => {})
+  }
+  if (!manager) return <div className="card">{jobs.length ? jobs.map((j, i) => <div className="task-card" key={i}><div className="task-title">{j.tieuDe || j.tenCongViec || j.noiDung || 'Công việc'}</div><div className="meta-line">Trạng thái: <b>{j.trangThai || 'Đang chờ'}</b></div></div>) : <><p className="page-note">Danh sách công việc được giao.</p><div className="task-card"><div className="task-title">Chưa có công việc</div><div className="meta-line">Trạng thái: <b>Đang chờ</b></div></div></>}</div>
+  return <><div className="screen-title-row"><span className="screen-title-icon">📝</span><h1>Giao việc</h1></div><div className="card task-form-card"><label className="field-label">Tổ trưởng</label><select className="form-control form-control-sm" value={leaderId} onChange={e => setLeaderId(e.target.value)}>{leaders.map((x, i) => <option key={i} value={String(x.maNv || x.ma || x.tenNv || x.ten || '')}>{leaderLabel(x)}</option>)}</select><label className="field-label">Tên công việc</label><input className="form-control form-control-sm" placeholder="Nhập tên công việc" value={tenCongViec} onChange={e => setTenCongViec(e.target.value)} /><label className="field-label">Nội dung công việc</label><div className="textarea-wrap"><textarea className="form-control task-textarea" maxLength={500} placeholder="Nhập nội dung chi tiết công việc" value={noiDung} onChange={e => setNoiDung(e.target.value)} /><span>{noiDung.length}/500</span></div><label className="field-label">Ngày hoàn thành</label><input className="form-control form-control-sm" value={han} onChange={e => setHan(e.target.value)} /><div className="note-compact">ℹ️ Công việc sẽ được lưu và thông báo cho Tổ trưởng.</div><button className="secondary-button" onClick={resetForm}>↻ Nhập lại</button><div style={{height:10}} /><button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={saveTask}>💾 Lưu giao việc</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('Chưa')} /></div></>
+}
+function toInputDate(v) {
+  const d = new Date()
+  if (!v) return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) { const [dd, mm, yy] = v.split('/'); return `${yy}-${mm}-${dd}` }
+  return v
+}
+function fromInputDate(v) { if (!v) return ''; const [yy, mm, dd] = v.split('-'); return `${dd}/${mm}/${yy}` }
+function monthStartInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01` }
+function monthEndInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(new Date(d.getFullYear(), d.getMonth()+1, 0).getDate())}` }
+function PrintOvertimeScreen({ session, departments }) {
+  const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả'), [thang, setThang] = useState(monthNow())
+  const [tuNgay, setTuNgay] = useState(monthStartInput()), [denNgay, setDenNgay] = useState(monthEndInput()), [busy, setBusy] = useState(false), [fileUrl, setFileUrl] = useState('')
+  const cacheKey = localKey('in_tang_ca_preview', [bp, tuNgay, denNgay, thang])
+  useEffect(() => { const cached = readJson(cacheKey, null); if (cached?.rows) { setRows(cached.rows); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } }, [bp, tuNgay, denNgay, thang])
+  function validateRange() { if (tuNgay && denNgay && tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return false } return true }
+  async function load() { if (!validateRange()) return; setBusy(true); setMsg('⏳ Đang lấy dữ liệu xem trước...'); try { const r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang]); const data = r?.rows || []; setRows(data); writeJson(cacheKey, { rows: data, cachedAt: Date.now() }); setMsg(r?.message || `✅ Đã tải ${data.length} dòng xem trước.`) } catch (e) { setMsg(e.message || 'Không xem trước được.') } finally { setBusy(false) } }
+  async function exportExcel() { if (!validateRange()) return; setBusy(true); setMsg('⏳ Đang tạo file Excel...'); try { const r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang }]); const url = r?.url || r?.fileUrl || r?.downloadUrl || ''; setFileUrl(url); setMsg(url ? '✅ Đã tạo file Excel. Có thể mở link hoặc gửi qua Zalo.' : '✅ Đã gửi yêu cầu xuất Excel.') ; if (url) window.open(url, '_blank') } catch (e) { setMsg(`❌ Chưa xuất được Excel: ${e.message || 'Lỗi Apps Script.'}`) } finally { setBusy(false) } }
+  function shareZalo() { if (!fileUrl) return; window.open(`https://zalo.me/share?url=${encodeURIComponent(fileUrl)}`, '_blank') }
+  return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu 45 ngày gần nhất.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={r.maNv || i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
+}
+function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
   const [booting, setBooting] = useState(true)
   const [bootText, setBootText] = useState('Đang tải dữ liệu gốc...')
@@ -664,7 +800,18 @@ function App() {
     return () => { alive = false }
   }, [])
 
-  useEffect(() => { const run = () => syncQueue().then(() => setSyncCount(readJson(OFFLINE_QUEUE_KEY, []).length)); window.addEventListener('online', run); const t = setInterval(run, 60000); return () => { window.removeEventListener('online', run); clearInterval(t) } }, [])
+  useEffect(() => {
+    const updateCount = () => setSyncCount(readJson(OFFLINE_QUEUE_KEY, []).length)
+    const run = () => syncQueue().then(updateCount).catch(updateCount)
+    const onVisible = () => { if (document.visibilityState === 'visible') run() }
+    window.addEventListener('online', run)
+    window.addEventListener('focus', run)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('erp-queue-change', updateCount)
+    const t = setInterval(run, 15000)
+    run()
+    return () => { window.removeEventListener('online', run); window.removeEventListener('focus', run); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('erp-queue-change', updateCount); clearInterval(t) }
+  }, [])
   function handleSession(info) { setSession(info); setScreen('home') }
   function logout() { clearJson(SESSION_KEY); setSession(null); setScreen('login') }
   if (booting) return <div className="app-shell"><BootSplash text={bootText} /></div>
