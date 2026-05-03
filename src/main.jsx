@@ -973,11 +973,11 @@ function PrintOvertimeScreen({ session, departments }) {
   const reportTypes = ['Tăng ca', 'Làm ngày lễ', 'Chuyển bộ phận']
   const overtimeTypes = ['Tất cả', 'Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']
   const [loaiBaoCao, setLoaiBaoCao] = useState('Tăng ca')
-  const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả'), [thang, setThang] = useState(monthNow())
+  const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả')
   const [loaiTangCa, setLoaiTangCa] = useState('Tất cả')
   const [tuNgay, setTuNgay] = useState(monthStartInput()), [denNgay, setDenNgay] = useState(monthEndInput()), [busy, setBusy] = useState(false), [fileUrl, setFileUrl] = useState('')
   const showLoaiTangCa = loaiBaoCao === 'Tăng ca'
-  const cacheKey = localKey('in_bao_cao_preview', [loaiBaoCao, bp, showLoaiTangCa ? loaiTangCa : 'NA', tuNgay, denNgay, thang])
+  const cacheKey = localKey('in_bao_cao_preview', [loaiBaoCao, bp, showLoaiTangCa ? loaiTangCa : 'NA', tuNgay, denNgay])
 
   useEffect(() => {
     const cached = readJson(cacheKey, null)
@@ -992,48 +992,76 @@ function PrintOvertimeScreen({ session, departments }) {
 
   function validateRange() { if (tuNgay && denNgay && tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return false } return true }
   function normalizePreviewRows(r) { return Array.isArray(r) ? r : (r?.rows || r?.items || []) }
-
+  function reportParams() {
+    return {
+      loaiBaoCao,
+      boPhan: bp,
+      tuNgay: fromInputDate(tuNgay),
+      denNgay: fromInputDate(denNgay),
+      loaiTangCa: showLoaiTangCa ? loaiTangCa : 'Tất cả',
+    }
+  }
+  function reportTitle() {
+    if (loaiBaoCao === 'Tăng ca') return showLoaiTangCa && loaiTangCa !== 'Tất cả' ? loaiTangCa : 'Tăng ca'
+    if (loaiBaoCao === 'Làm ngày lễ') return 'Làm ngày lễ'
+    return 'Điều động sang tổ khác'
+  }
+  function cellValue(r, keys, fallback = '') {
+    for (const k of keys) {
+      const v = r?.[k]
+      if (v !== undefined && v !== null && String(v) !== '') return v
+    }
+    return fallback
+  }
   async function load() {
     if (!validateRange()) return
     setBusy(true)
     setMsg('⏳ Đang lấy dữ liệu xem trước...')
     try {
       let r
-      // Dùng action gốc đã có trong Apps Script để không phát sinh lỗi "Action không hợp lệ".
-      // Với Làm ngày lễ / Chuyển bộ phận: gửi thêm loaiBaoCao ở tham số cuối; Apps Script mới có thể dùng để lọc LOAI_BAO_CAO.
-      // Apps Script cũ sẽ bỏ qua tham số thừa nhưng không làm vỡ màn hình.
-      r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, showLoaiTangCa ? loaiTangCa : 'Tất cả', loaiBaoCao])
+      try {
+        // Action mới đọc trực tiếp bảng BAO_CAO_CHI_TIET, lọc đúng LOAI_BAO_CAO / CHI_TIET / ngày / bộ phận.
+        r = await api('getBaoCaoChiTietXemTruoc', [reportParams()])
+      } catch (firstError) {
+        // Giữ tương thích bản cũ: chỉ fallback cho báo cáo Tăng ca vì Apps Script cũ chỉ biết tăng ca.
+        if (loaiBaoCao !== 'Tăng ca') throw firstError
+        r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), '', loaiTangCa])
+      }
       const data = normalizePreviewRows(r)
       setRows(data)
       writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
-      setMsg(r?.message || (data.length ? `✅ Đã tải ${data.length} dòng xem trước.` : 'Không có dữ liệu theo bộ lọc.'))
-    } catch (e) { setMsg(e.message || 'Không xem trước được.') }
+      setMsg(r?.message || (data.length ? `✅ Đã tải đủ ${data.length} dòng ${reportTitle()}.` : 'Không có dữ liệu theo bộ lọc.'))
+    } catch (e) { setMsg(e.message || 'Không xem trước được. Cần cập nhật Apps Script đọc BAO_CAO_CHI_TIET.') }
     finally { setBusy(false) }
   }
 
   async function exportExcel() {
     if (!validateRange()) return
     setBusy(true)
-    setMsg('⏳ Đang tạo file Excel...')
+    setMsg(`⏳ Đang tạo file Excel: ${reportTitle()}...`)
     try {
       let r
-      // Dùng action xuất Excel gốc để không cần mở thêm API mới.
-      r = await api('exportTangCaExcel', [{ loaiBaoCao, boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa: showLoaiTangCa ? loaiTangCa : 'Tất cả' }])
+      try {
+        r = await api('exportBaoCaoChiTietExcel', [reportParams()])
+      } catch (firstError) {
+        if (loaiBaoCao !== 'Tăng ca') throw firstError
+        r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), loaiTangCa }])
+      }
       const url = r?.url || r?.fileUrl || r?.downloadUrl || r
       const realUrl = typeof url === 'string' ? url : ''
       setFileUrl(realUrl)
-      setMsg(realUrl ? `✅ Đã tạo file Excel: ${loaiBaoCao}. Có thể mở link hoặc gửi qua Zalo.` : '✅ Đã gửi yêu cầu xuất Excel.')
+      setMsg(realUrl ? `✅ Đã tạo file Excel: ${reportTitle()}.` : `✅ Đã gửi yêu cầu xuất Excel: ${reportTitle()}.`)
       if (realUrl) window.open(realUrl, '_blank')
-    } catch (e) { setMsg(`❌ Chưa xuất được Excel: ${e.message || 'Cần cập nhật Apps Script cho loại báo cáo này.'}`) }
+    } catch (e) { setMsg(`❌ Chưa xuất được Excel ${reportTitle()}: ${e.message || 'Cần cập nhật Apps Script.'}`) }
     finally { setBusy(false) }
   }
 
   async function shareZalo() {
     if (!fileUrl) { setMsg('❌ Chưa có link Excel để gửi.'); return }
-    const shareText = `File ${loaiBaoCao}: ${fileUrl}`
+    const shareText = `File ${reportTitle()}: ${fileUrl}`
     if (navigator.share) {
       try {
-        await navigator.share({ title: `File ${loaiBaoCao}`, text: shareText, url: fileUrl })
+        await navigator.share({ title: `File ${reportTitle()}`, text: shareText, url: fileUrl })
         setMsg('✅ Đã mở bảng chia sẻ. Chọn Zalo để gửi link.')
         return
       } catch (e) {
@@ -1049,7 +1077,14 @@ function PrintOvertimeScreen({ session, departments }) {
     }
   }
 
-  return <><div className="screen-title-row"><span className="screen-title-icon">📄</span><h1>In báo cáo</h1></div><div className="card print-overtime-card"><label className="field-label">Loại báo cáo</label><select className="form-control form-control-sm" value={loaiBaoCao} onChange={e => { setLoaiBaoCao(e.target.value); setFileUrl(''); setRows([]); setMsg('') }}>{reportTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select>{showLoaiTangCa && <><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select></>}<div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được') && !msg.includes('Chưa')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={(r.maNv || r.ma || '') + '_' + i}><td>{r.maNv || r.ma || i + 1}</td><td>{r.tenNv || r.ten || r.hoTen || ''}</td><td>{r.boPhanGoc || r.boPhan || bp}</td><td>{r.chiTiet || r.loaiTangCa || r.loaiBaoCao || loaiBaoCao}</td><td>{r.tong || r.soGio || r.soNgay || ''}</td></tr>)}</tbody></table></div>}</div></>
+  function renderPreviewTable() {
+    if (!rows.length) return null
+    if (loaiBaoCao === 'Tăng ca') return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận</th><th>Loại tăng ca</th><th>Bắt đầu</th><th>Kết thúc</th><th>Số giờ</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET'], loaiTangCa)}</td><td>{cellValue(r, ['batDau','BAT_DAU'])}</td><td>{cellValue(r, ['ketThuc','KET_THUC'])}</td><td>{cellValue(r, ['soGio','SO_GIO'])}</td></tr>)}</tbody></table></div>
+    if (loaiBaoCao === 'Làm ngày lễ') return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận</th><th>Ngày</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['ngay','NGAY'])}</td><td>{cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn')}</td><td>{cellValue(r, ['ghiChu','GHI_CHU'])}</td></tr>)}</tbody></table></div>
+    return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận gốc</th><th>Tổ chuyển đến</th><th>Ngày</th><th>Trạng thái</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN'])}</td><td>{cellValue(r, ['ngay','NGAY'])}</td><td>{cellValue(r, ['trangThai','TRANG_THAI'])}</td></tr>)}</tbody></table></div>
+  }
+
+  return <><div className="screen-title-row"><span className="screen-title-icon">📄</span><h1>In báo cáo</h1></div><div className="card print-overtime-card"><label className="field-label">Loại báo cáo</label><select className="form-control form-control-sm" value={loaiBaoCao} onChange={e => { setLoaiBaoCao(e.target.value); setFileUrl(''); setRows([]); setMsg('') }}>{reportTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select>{showLoaiTangCa && <><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select></>}<div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được') && !msg.includes('Chưa')} />{renderPreviewTable()}</div></>
 }
 function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'ngay-le') return <DataEntryScreen type="Làm ngày lễ" items={['Đăng ký làm ngày lễ']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
