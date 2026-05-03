@@ -999,11 +999,10 @@ function PrintOvertimeScreen({ session, departments }) {
     setMsg('⏳ Đang lấy dữ liệu xem trước...')
     try {
       let r
-      if (loaiBaoCao === 'Tăng ca') {
-        r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, loaiTangCa])
-      } else {
-        r = await api('getBaoCaoXemTruoc', [{ loaiBaoCao, boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang }])
-      }
+      // Dùng action gốc đã có trong Apps Script để không phát sinh lỗi "Action không hợp lệ".
+      // Với Làm ngày lễ / Chuyển bộ phận: gửi thêm loaiBaoCao ở tham số cuối; Apps Script mới có thể dùng để lọc LOAI_BAO_CAO.
+      // Apps Script cũ sẽ bỏ qua tham số thừa nhưng không làm vỡ màn hình.
+      r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, showLoaiTangCa ? loaiTangCa : 'Tất cả', loaiBaoCao])
       const data = normalizePreviewRows(r)
       setRows(data)
       writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
@@ -1018,11 +1017,8 @@ function PrintOvertimeScreen({ session, departments }) {
     setMsg('⏳ Đang tạo file Excel...')
     try {
       let r
-      if (loaiBaoCao === 'Tăng ca') {
-        r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa }])
-      } else {
-        r = await api('exportBaoCaoExcel', [{ loaiBaoCao, boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang }])
-      }
+      // Dùng action xuất Excel gốc để không cần mở thêm API mới.
+      r = await api('exportTangCaExcel', [{ loaiBaoCao, boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa: showLoaiTangCa ? loaiTangCa : 'Tất cả' }])
       const url = r?.url || r?.fileUrl || r?.downloadUrl || r
       const realUrl = typeof url === 'string' ? url : ''
       setFileUrl(realUrl)
