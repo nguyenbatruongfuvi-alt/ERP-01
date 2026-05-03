@@ -165,6 +165,19 @@ async function preloadTodayData(boPhan, opts = {}) {
   return refreshTodayData(boPhan)
 }
 function localKey(kind, parts = []) { return `${LOCAL_SAVE_PREFIX}_${kind}_${parts.filter(Boolean).join('_')}` }
+function loginCacheKey(boPhan) { return localKey('login_cache', [stripVietnamese(boPhan || '')]) }
+function saveLoginCache(boPhan, password, session, cacheData, preloadData) {
+  if (!boPhan || !session) return
+  writeJson(loginCacheKey(boPhan), {
+    boPhan,
+    password: String(password || ''),
+    session,
+    cache: cacheData || null,
+    preload: preloadData || null,
+    savedAt: new Date().toISOString()
+  })
+}
+function readLoginCache(boPhan) { return readJson(loginCacheKey(boPhan), null) }
 function queueSave(action, args, meta = {}) {
   const q = readJson(OFFLINE_QUEUE_KEY, [])
   const requestId = meta.requestId || args?.[0]?.requestId || Date.now() + '-' + Math.random().toString(16).slice(2)
@@ -179,46 +192,23 @@ function updateQueuedItem(id, patch) {
   writeJson(OFFLINE_QUEUE_KEY, q.map(x => (x.id === id || x.requestId === id) ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x))
   window.dispatchEvent(new Event('erp-queue-change'))
 }
-let syncQueueRunning = false
 async function syncQueue() {
-  if (syncQueueRunning) return 0
   let q = readJson(OFFLINE_QUEUE_KEY, [])
-  if (!q.length || !navigator.onLine) {
-    window.dispatchEvent(new Event('erp-queue-change'))
-    return 0
-  }
-  syncQueueRunning = true
+  if (!q.length || !navigator.onLine) return 0
   let synced = 0
   const remain = []
-  try {
-    for (const item of q) {
-      const tries = Number(item.tries || 0) + 1
-      try {
-        updateQueuedItem(item.id, { status: 'syncing', tries })
-        await api(item.action, item.args)
-        synced += 1
-      } catch (e) {
-        remain.push({
-          ...item,
-          status: tries >= 20 ? 'error' : 'pending',
-          error: e?.message || 'Chưa đồng bộ được',
-          tries,
-          updatedAt: new Date().toISOString()
-        })
-      }
+  for (const item of q) {
+    try {
+      updateQueuedItem(item.id, { status: 'syncing', tries: Number(item.tries || 0) + 1 })
+      await api(item.action, item.args)
+      synced += 1
+    } catch (e) {
+      remain.push({ ...item, status: 'error', error: e?.message || 'Chưa đồng bộ được', tries: Number(item.tries || 0) + 1, updatedAt: new Date().toISOString() })
     }
-    writeJson(OFFLINE_QUEUE_KEY, remain)
-    writeJson('erp_v30_last_sync_state', {
-      at: new Date().toISOString(),
-      synced,
-      remain: remain.length,
-      online: navigator.onLine
-    })
-    window.dispatchEvent(new Event('erp-queue-change'))
-    return synced
-  } finally {
-    syncQueueRunning = false
   }
+  writeJson(OFFLINE_QUEUE_KEY, remain)
+  window.dispatchEvent(new Event('erp-queue-change'))
+  return synced
 }
 function getLocalCount(boPhan, loai, title) {
   const pre = getPreloadedToday(boPhan)
@@ -267,16 +257,6 @@ function networkStateText() {
   if (!q.total) return 'Đã đồng bộ'
   if (q.error) return `Chờ đồng bộ: ${q.total} / lỗi: ${q.error}`
   return `Chờ đồng bộ: ${q.total}`
-}
-
-async function syncAndRefresh(boPhan, setCache) {
-  const synced = await syncQueue()
-  if (synced > 0 && boPhan && navigator.onLine) {
-    const data = await refreshTodayData(boPhan).catch(() => null)
-    const merged = data ? applyPreloadToCache(boPhan, data) : null
-    if (merged && setCache) setCache(merged)
-  }
-  return synced
 }
 
 function MenuContent({ onSelect, syncCount, onLogout }) {
@@ -340,17 +320,27 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
       const cachedSession = readJson(SESSION_KEY, null)
       const cachedCache = readJson(CACHE_KEY, null)
 
-      // OFFLINE-FIRST LOGIN: nếu máy không có mạng nhưng đã từng đăng nhập bộ phận này,
-      // cho vào app ngay bằng session/cache đã lưu trên máy. Không gọi Apps Script.
+      // OFFLINE-FIRST LOGIN: ưu tiên cache đăng nhập riêng theo bộ phận.
+      // Đã từng đăng nhập online bộ phận nào thì bộ phận đó vẫn đăng nhập offline được,
+      // kể cả sau khi bấm Đăng xuất / Đăng nhập lại.
       if (!navigator.onLine) {
-        if (cachedSession && String(cachedSession.boPhan || '') === String(department || '')) {
-          const merged = applyPreloadToCache(department, preload) || cachedCache
-          if (merged) setCache(merged)
+        const loginCache = readLoginCache(department)
+        const sameDeptSession = cachedSession && String(cachedSession.boPhan || '') === String(department || '')
+        const passwordOk = loginCache ? String(loginCache.password || '') === String(password || '') : sameDeptSession
+        const offlineSession = loginCache?.session || (sameDeptSession ? cachedSession : null)
+        const offlineCache = loginCache?.cache || cachedCache
+        const offlinePreload = loginCache?.preload || preload
+        if (offlineSession && passwordOk) {
+          if (offlinePreload) applyPreloadToCache(department, offlinePreload)
+          if (offlineCache) setCache(offlineCache)
+          writeJson(SESSION_KEY, offlineSession)
           writeJson(LAST_DEPT_KEY, department)
-          setMsg('✅ Đã mở app bằng dữ liệu lưu trên máy.')
-          setSession({ ...cachedSession, offlineMode: true, todayPreloaded: !!preload })
+          setMsg('✅ Đã đăng nhập offline bằng dữ liệu lưu trên máy.')
+          setSession({ ...offlineSession, offlineMode: true, todayPreloaded: !!offlinePreload })
+        } else if (offlineSession && !passwordOk) {
+          setMsg('❌ Mật khẩu offline không đúng với lần đăng nhập đã lưu.')
         } else {
-          setMsg('❌ Máy đang offline. Bộ phận này chưa có dữ liệu đăng nhập lưu trên máy.')
+          setMsg('❌ Máy đang offline. Hãy đăng nhập online bộ phận này 1 lần để lưu dữ liệu offline.')
         }
         setBusy(false)
         return
@@ -368,6 +358,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
       const session = { ...info, todayPreloaded: !!preload, loggedAt: Date.now() }
       writeJson(SESSION_KEY, session)
       writeJson(LAST_DEPT_KEY, department)
+      saveLoginCache(department, password, session, merged, preload)
       setSession(session)
     } catch (e) { setMsg(e.message || 'Đăng nhập lỗi.') }
     setBusy(false)
@@ -437,8 +428,19 @@ function ReportScreen({ session }) {
   </div>
 }
 function CompanyScreen() {
-  const [data, setData] = useState({ rows: [], tongCN: 0, coMat: 0, vangSang: 0, vangChieu: 0, vangCaNgay: 0 }), [msg, setMsg] = useState('')
-  useEffect(() => { api('getBaoCaoTongCongTy', [today()]).then(setData).catch(e => setMsg(e.message)) }, [])
+  const defaultCompanyData = { rows: [], tongCN: 0, coMat: 0, vangSang: 0, vangChieu: 0, vangCaNgay: 0 }
+  const cacheKey = localKey('bao_cao_cong_ty', [today()])
+  const [data, setData] = useState(() => readJson(cacheKey, null)?.data || defaultCompanyData), [msg, setMsg] = useState(() => readJson(cacheKey, null)?.data ? 'Đang hiển thị dữ liệu đã lưu trên máy.' : '')
+  useEffect(() => {
+    const local = readJson(cacheKey, null)
+    if (local?.data) { setData(local.data); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') }
+    if (!navigator.onLine) { if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.'); return }
+    api('getBaoCaoTongCongTy', [today()]).then(r => {
+      setData(r || defaultCompanyData)
+      writeJson(cacheKey, { data: r || defaultCompanyData, cachedAt: Date.now() })
+      setMsg('✅ Đã cập nhật báo cáo công ty.')
+    }).catch(e => { if (!local?.data) setMsg(e.message) })
+  }, [])
   const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
   return <><div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
     <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={r.boPhan || i}><td>{i + 1}</td><td>{r.boPhan}</td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td></tr>)}</tbody></table></div><Status text={msg} ok={false} /></div></>
@@ -877,11 +879,7 @@ function App() {
 
   useEffect(() => {
     const updateCount = () => setSyncCount(readJson(OFFLINE_QUEUE_KEY, []).length)
-    const run = () => {
-      updateCount()
-      if (!navigator.onLine || !readJson(OFFLINE_QUEUE_KEY, []).length) return Promise.resolve(0)
-      return syncAndRefresh(session?.boPhan || readJson(LAST_DEPT_KEY, ''), setCache).then(updateCount).catch(updateCount)
-    }
+    const run = () => syncQueue().then(updateCount).catch(updateCount)
     const onVisible = () => { if (document.visibilityState === 'visible') run() }
     window.addEventListener('online', run)
     window.addEventListener('focus', run)
@@ -890,7 +888,7 @@ function App() {
     const t = setInterval(run, 5000)
     run()
     return () => { window.removeEventListener('online', run); window.removeEventListener('focus', run); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('erp-queue-change', updateCount); clearInterval(t) }
-  }, [session?.boPhan])
+  }, [])
   function handleSession(info) { setSession(info); setScreen('home') }
   function logout() { clearJson(SESSION_KEY); setSession(null); setScreen('login') }
   if (booting) return <div className="app-shell"><BootSplash text={bootText} /></div>
