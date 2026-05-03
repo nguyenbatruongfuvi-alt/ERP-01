@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v40-api-call-full-clean-structure';
+const CACHE_VERSION = 'v41-ui-final-menu-report-holiday';
 const CACHE_NAME = `erp-v30-ui-shell-${CACHE_VERSION}`;
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png', '/logo-192.png', '/logo-512.png'];
 

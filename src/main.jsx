@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const APP_VERSION = 'V30.40_API_CALL_FULL_CLEAN_STRUCTURE'
+const APP_VERSION = 'V30.41_UI_FINAL_MENU_REPORT_HOLIDAY'
 const APP_VERSION_KEY = 'erp_v30_app_version'
 let SYNC_QUEUE_RUNNING = false
 
@@ -98,8 +98,8 @@ function personSearchText(p) {
 
 const menuGroups = [
   { title: 'BÁO CÁO', items: [{ id: 'bao-cao', icon: '📋', label: 'Báo cáo bộ phận' }, { id: 'tong-cty', icon: '📊', label: 'Báo cáo công ty' }] },
-  { title: 'NHẬP LIỆU', items: [{ id: 'tang-ca', icon: '🕒', label: 'Tăng ca' }, { id: 'bien-dong', icon: '👥', label: 'Biến động' }, { id: 'vang', icon: '🧾', label: 'Vắng mặt' }, { id: 'giao-viec', icon: '📝', label: 'Giao việc' }] },
-  { title: 'TIỆN ÍCH', items: [{ id: 'in-tang-ca', icon: '🖨️', label: 'In tăng ca' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
+  { title: 'NHẬP LIỆU', items: [{ id: 'tang-ca', icon: '🕒', label: 'Tăng ca' }, { id: 'bien-dong', icon: '👥', label: 'Biến động' }, { id: 'vang', icon: '🧾', label: 'Vắng mặt' }, { id: 'dang-ky-ngay-le', icon: '🗓️', label: 'Đăng ký làm ngày lễ' }, { id: 'giao-viec', icon: '📝', label: 'Giao việc' }] },
+  { title: 'TIỆN ÍCH', items: [{ id: 'in-tang-ca', icon: '📄', label: 'In báo cáo' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
 ]
 
 function markOfflineError(err) {
@@ -630,11 +630,74 @@ function ReportScreen({ session }) {
     <div style={{ height: 12 }} /><button className={saveButtonClass("primary-button", msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : 'Nhập / Cập nhật báo cáo'}</button><Status text={msg} />
   </div>
 }
+
+function normalizeAbsentDetailRow(row) {
+  const rawType = row.chiTiet || row.CHI_TIET || row.loaiVang || row.LOAI_VANG || row.trangThai || ''
+  const type = String(rawType || '').includes('sáng') ? 'Vắng sáng' : String(rawType || '').includes('chiều') ? 'Vắng chiều' : String(rawType || '').includes('cả ngày') ? 'Vắng cả ngày' : rawType || 'Vắng'
+  return {
+    maNv: row.maNv || row.MA_NV || row.ma || '',
+    tenNv: row.tenNv || row.TEN_NV || row.ten || '',
+    boPhan: row.boPhan || row.BO_PHAN_BAO_CAO || row.boPhanBaoCao || row.boPhanGoc || row.BO_PHAN_GOC || '',
+    loaiVang: type,
+    trangThai: row.trangThai || row.TRANG_THAI || ''
+  }
+}
+function findAbsentRowsFromStorage(boPhan, ngay = today()) {
+  const targetDept = stripVietnamese(boPhan)
+  const results = []
+  const pushRows = (rows) => {
+    if (!Array.isArray(rows)) return
+    rows.forEach(row => {
+      const loai = row.loaiBaoCao || row.LOAI_BAO_CAO || row.loai || ''
+      const chiTiet = row.chiTiet || row.CHI_TIET || ''
+      const dept = row.boPhan || row.BO_PHAN_BAO_CAO || row.boPhanBaoCao || row.boPhanGoc || row.BO_PHAN_GOC || ''
+      const rowDate = row.ngay || row.NGAY || ngay
+      const isAbsent = String(loai).includes('vắng') || String(loai).includes('vang') || String(chiTiet).includes('Vắng') || String(chiTiet).includes('vắng')
+      if (isAbsent && stripVietnamese(dept) === targetDept && (!rowDate || rowDate === ngay)) results.push(normalizeAbsentDetailRow(row))
+    })
+  }
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key || !key.includes('erp_v30')) continue
+    const raw = readJson(key, null)
+    if (!raw) continue
+    if (Array.isArray(raw)) pushRows(raw)
+    pushRows(raw.rows); pushRows(raw.items); pushRows(raw.data?.rows); pushRows(raw.cache?.rows); pushRows(raw.today?.rows)
+    if (raw.bundles) Object.values(raw.bundles || {}).forEach(group => Object.values(group || {}).forEach(b => pushRows(b?.items)))
+  }
+  const dedupe = new Map()
+  results.forEach(r => dedupe.set(`${r.maNv}_${r.loaiVang}`, r))
+  return Array.from(dedupe.values())
+}
+function AbsentDetailPanel({ department, onClose }) {
+  const [filter, setFilter] = useState('Tất cả')
+  const [rows, setRows] = useState(() => findAbsentRowsFromStorage(department))
+  const [msg, setMsg] = useState('Dữ liệu được tổng hợp từ báo cáo vắng mặt.')
+  useEffect(() => {
+    const local = findAbsentRowsFromStorage(department)
+    if (local.length) setRows(local)
+    if (navigator.onLine) {
+      api('getDanhSachVangTheoBoPhan', [today(), department], { cachedFallback: local }).then(r => {
+        const list = (r?.rows || r || []).map(normalizeAbsentDetailRow)
+        if (list.length) { setRows(list); setMsg(`Cập nhật lần cuối: ${new Date().toLocaleTimeString('vi-VN')} ${today()}`) }
+      }).catch(() => {})
+    }
+  }, [department])
+  const counts = {
+    'Vắng sáng': rows.filter(x => String(x.loaiVang).includes('sáng')).length,
+    'Vắng chiều': rows.filter(x => String(x.loaiVang).includes('chiều')).length,
+    'Vắng cả ngày': rows.filter(x => String(x.loaiVang).includes('cả ngày')).length,
+  }
+  const filtered = filter === 'Tất cả' ? rows : rows.filter(x => String(x.loaiVang).includes(filter.replace('Vắng ', '')))
+  const badgeClass = (type) => String(type).includes('cả ngày') ? 'absent-badge red' : String(type).includes('chiều') ? 'absent-badge orange' : 'absent-badge yellow'
+  return <div className="absent-detail-card"><div className="absent-detail-head"><h2>Danh sách vắng - {department}</h2><button onClick={onClose}>×</button></div><div className="absent-kpi-grid"><div className="absent-kpi"><span>Vắng sáng</span><b className="text-orange">{counts['Vắng sáng']}</b></div><div className="absent-kpi"><span>Vắng chiều</span><b className="text-orange">{counts['Vắng chiều']}</b></div><div className="absent-kpi"><span>Vắng cả ngày</span><b className="text-red">{counts['Vắng cả ngày']}</b></div></div><div className="absent-filter-row">{['Tất cả','Vắng sáng','Vắng chiều','Vắng cả ngày'].map(x => <button key={x} className={filter === x ? 'active' : ''} onClick={() => setFilter(x)}>{x}</button>)}<span>Tổng: {filtered.length}</span></div><div className="table-scroll absent-table-wrap"><table className="summary-table absent-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Loại vắng</th></tr></thead><tbody>{filtered.length ? filtered.map((r, i) => <tr key={`${r.maNv}_${i}`}><td>{i + 1}</td><td>{r.maNv}</td><td>{r.tenNv}</td><td><span className={badgeClass(r.loaiVang)}>{r.loaiVang}</span></td></tr>) : <tr><td colSpan="4">Chưa có danh sách vắng.</td></tr>}</tbody></table></div><div className="note-compact">ℹ️ {msg}</div><button className="secondary-button" onClick={onClose}>Đóng</button></div>
+}
 function CompanyScreen({ session }) {
   const defaultCompanyData = { rows: [], tongCN: 0, coMat: 0, vangSang: 0, vangChieu: 0, vangCaNgay: 0 }
   const initialCache = findCompanyReportCache(today())
   const [data, setData] = useState(() => initialCache?.data || defaultCompanyData)
   const [msg, setMsg] = useState(() => initialCache?.data ? '⚡ Đang hiển thị dữ liệu đã lưu trên máy.' : '')
+  const [absentDept, setAbsentDept] = useState('')
   useEffect(() => {
     const loadLocal = () => {
       const local = findCompanyReportCache(today())
@@ -675,7 +738,7 @@ function CompanyScreen({ session }) {
   }, [session?.boPhan])
   const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
   return <><div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
-    <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={r.boPhan || i}><td>{i + 1}</td><td>{r.boPhan}</td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td></tr>)}</tbody></table></div><Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} /></div></>
+    <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table company-click-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th><th></th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={r.boPhan || i} onClick={() => setAbsentDept(r.boPhan)}><td>{i + 1}</td><td>{r.boPhan}</td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td><td className="row-arrow">›</td></tr>)}</tbody></table></div><Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} /></div>{absentDept && <AbsentDetailPanel department={absentDept} onClose={() => setAbsentDept('')} />}</>
 }
 function useStaff(session, cache) {
   const preload = session?.boPhan ? getPreloadedToday(session.boPhan) : null
@@ -1047,24 +1110,99 @@ function toInputDate(v) {
 function fromInputDate(v) { if (!v) return ''; const [yy, mm, dd] = v.split('-'); return `${dd}/${mm}/${yy}` }
 function monthStartInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01` }
 function monthEndInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(new Date(d.getFullYear(), d.getMonth()+1, 0).getDate())}` }
+
+function HolidayWorkScreen({ session, cache }) {
+  const staff = useStaff(session, cache)
+  const [tuNgay, setTuNgay] = useState(monthStartInput())
+  const [denNgay, setDenNgay] = useState(monthEndInput())
+  const [rows, setRows] = useState(() => (staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })))
+  const [kw, setKw] = useState('')
+  const [remoteResults, setRemoteResults] = useState([])
+  const [inTeamOpen, setInTeamOpen] = useState(true)
+  const [outsideOpen, setOutsideOpen] = useState(true)
+  const [msg, setMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false }))) }, [staff])
+  useEffect(() => {
+    const q = kw.trim()
+    if (!q || q.length < 2) { setRemoteResults([]); return }
+    const timer = setTimeout(() => { api('searchNhanSu', [session.boPhan, q]).then(list => setRemoteResults(list || [])).catch(() => {}) }, 220)
+    return () => clearTimeout(timer)
+  }, [kw, session.boPhan])
+  const daysText = useMemo(() => {
+    const start = new Date(tuNgay), end = new Date(denNgay)
+    if (!tuNgay || !denNgay || start > end) return 'Chưa chọn đủ ngày lễ.'
+    const days = Math.round((end - start) / 86400000) + 1
+    return `Đã chọn: ${days} ngày lễ (${fromInputDate(tuNgay)} - ${fromInputDate(denNgay)})`
+  }, [tuNgay, denNgay])
+  const selected = rows.filter(x => x.selected)
+  const inTeamRows = rows.filter(x => sameDeptRow(x, session.boPhan))
+  const outsideRows = rows.filter(x => !sameDeptRow(x, session.boPhan))
+  const searchResults = useMemo(() => {
+    const q = stripVietnamese(kw)
+    const base = q ? rows.filter(p => personSearchText(p).includes(q)) : []
+    const map = new Map(base.map(p => [p.maNv, p]))
+    remoteResults.forEach(x => { const p = normalizeRow(x); if (p.maNv && !map.has(p.maNv)) map.set(p.maNv, { ...p, outside: true, selected: rows.find(r => r.maNv === p.maNv)?.selected === true }) })
+    return Array.from(map.values()).slice(0, 12)
+  }, [kw, rows, remoteResults])
+  function toggle(ma) { setRows(list => sortPickRows(list.map(x => x.maNv === ma ? { ...x, selected: !x.selected } : x), session.boPhan)) }
+  function addExternal(p) {
+    const person = { ...normalizeRow(p), outside: true, selected: true }
+    setRows(list => {
+      const exists = list.some(x => x.maNv === person.maNv)
+      const next = exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [person, ...list]
+      return sortPickRows(next, session.boPhan)
+    })
+  }
+  async function saveHoliday() {
+    if (saving) return
+    if (tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return }
+    if (!selected.length) { setMsg('Vui lòng chọn ít nhất 1 nhân viên.'); return }
+    const requestId = `holiday_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    const payload = { requestId, ngayDangKy: today(), tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), boPhan: session.boPhan, toTruong: session.tenToTruong, loaiBaoCao: 'Làm ngày lễ', chiTiet: 'Đăng ký làm ngày lễ', items: selected.map(x => ({ maNv: x.maNv, tenNv: x.tenNv, boPhanGoc: x.boPhanGoc || x.boPhan || session.boPhan, trangThai: 'Đã chọn' })) }
+    setSaving(true)
+    writeJson(localKey('dang_ky_ngay_le', [payload.tuNgay, payload.denNgay, session.boPhan]), payload)
+    const n = queueSave('saveDangKyNgayLe', [payload], { requestId, screen: 'dang-ky-ngay-le' })
+    setMsg(`💾 ĐÃ LƯU TRÊN MÁY ${selected.length} người. Đang đồng bộ nền (${n}).`)
+    setSaving(false)
+    if (navigator.onLine) syncQueue().then(() => {
+      const left = readJson(OFFLINE_QUEUE_KEY, []).length
+      setMsg(left ? `💾 Đã lưu trên máy. Còn ${left} mục chờ đồng bộ.` : `✅ ĐÃ ĐỒNG BỘ THÀNH CÔNG ${selected.length} người`)
+    }).catch(() => setMsg('💾 Đã lưu trên máy. Sẽ tự đồng bộ khi mạng ổn.'))
+  }
+  const personLine = (p, prefix='') => <div className={`pick-row-lite ${p.selected ? 'selected' : ''} ${!sameDeptRow(p, session.boPhan) ? 'outside' : ''}`} key={`${prefix}${p.maNv}`} onClick={() => toggle(p.maNv)}><div className="person-info-lite"><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan || session.boPhan}{!sameDeptRow(p, session.boPhan) ? ' · ngoài tổ' : ''}</div></div><button className={p.selected ? 'secondary-button mini selected-mini' : 'primary-button mini'} onClick={(e) => { e.stopPropagation(); toggle(p.maNv) }}>{p.selected ? 'Đã chọn' : 'Chọn'}</button></div>
+  return <><div className="screen-title-row"><span className="screen-title-icon">🗓️</span><h1>Đăng ký làm ngày lễ</h1></div><div className="card holiday-card"><h2>1. Chọn ngày lễ</h2><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><div className="note-compact text-green">ℹ️ {daysText}</div><div className="pick-section-row" onClick={() => setInTeamOpen(v => !v)}><div><b>2. Nhân viên trong tổ</b> <span>({session.boPhan})</span></div><div className="section-right"><em>{inTeamRows.length}</em><i>{inTeamOpen ? '⌄' : '›'}</i></div></div><div className="pick-section-row" onClick={() => setOutsideOpen(v => !v)}><div><b>3. Thêm nhân viên từ bộ phận khác</b></div><div className="section-right"><em>{outsideRows.filter(x => x.selected).length}</em><i>{outsideOpen ? '⌃' : '›'}</i></div></div><div className="external-search-box holiday-search"><span className="search-ico">⌕</span><input value={kw} onChange={e => setKw(e.target.value)} placeholder="Nhập tên, mã số (có dấu hoặc không dấu)..." />{kw && <button onClick={() => setKw('')}>×</button>}</div>{kw && <div className="pick-list-lite holiday-list">{searchResults.length ? searchResults.map(p => rows.find(x => x.maNv === p.maNv) ? personLine(rows.find(x => x.maNv === p.maNv), 'sr_') : <div className="pick-row-lite external" key={`sr_${p.maNv}`}><div className="person-info-lite"><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}</div></div><button className="primary-button mini" onClick={() => addExternal(p)}>Chọn</button></div>) : <div className="note-compact">Không thấy nhân viên phù hợp.</div>}</div>}{inTeamOpen && <div className="pick-list-lite holiday-list">{inTeamRows.map(p => personLine(p, 'in_'))}</div>}{outsideOpen && outsideRows.length > 0 && <div className="pick-list-lite holiday-list">{outsideRows.map(p => personLine(p, 'out_'))}</div>}<button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={saveHoliday}>💾 Lưu ({selected.length} nhân viên)</button><div className="small-text holiday-footnote">ℹ️ Danh sách chọn sẽ được đăng ký làm việc trong ngày lễ đã chọn.</div><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('không được')} /></div></>
+}
+
+
 function PrintOvertimeScreen({ session, departments }) {
+  const reportTypes = ['Tăng ca', 'Làm ngày lễ', 'Chuyển bộ phận']
   const overtimeTypes = ['Tất cả', 'Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']
+  const [reportType, setReportType] = useState('Tăng ca')
   const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả'), [thang, setThang] = useState(monthNow())
   const [loaiTangCa, setLoaiTangCa] = useState('Tất cả')
   const [tuNgay, setTuNgay] = useState(monthStartInput()), [denNgay, setDenNgay] = useState(monthEndInput()), [busy, setBusy] = useState(false), [fileUrl, setFileUrl] = useState('')
-  const cacheKey = localKey('in_tang_ca_preview', [bp, loaiTangCa, tuNgay, denNgay, thang])
-  useEffect(() => { const cached = readJson(cacheKey, null); if (cached?.rows) { setRows(cached.rows); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } }, [bp, loaiTangCa, tuNgay, denNgay, thang])
+  const cacheKey = localKey('in_bao_cao_preview', [reportType, bp, loaiTangCa, tuNgay, denNgay, thang])
+  useEffect(() => { const cached = readJson(cacheKey, null); if (cached?.rows) { setRows(cached.rows); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } else { setRows([]); setMsg('') } setFileUrl('') }, [reportType, bp, loaiTangCa, tuNgay, denNgay, thang])
   function validateRange() { if (tuNgay && denNgay && tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return false } return true }
+  function reportApiNames() {
+    if (reportType === 'Tăng ca') return { preview: 'getDanhSachTangCaXemTruoc', exportAction: 'exportTangCaExcel', title: 'File tăng ca' }
+    if (reportType === 'Làm ngày lễ') return { preview: 'getDanhSachNgayLeXemTruoc', exportAction: 'exportNgayLeExcel', title: 'File đăng ký làm ngày lễ' }
+    return { preview: 'getDanhSachChuyenBoPhanXemTruoc', exportAction: 'exportChuyenBoPhanExcel', title: 'File danh sách chuyển bộ phận' }
+  }
+  function requestPayload() { return { loaiBaoCao: reportType, boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa: reportType === 'Tăng ca' ? loaiTangCa : '' } }
   async function load() {
     if (!validateRange()) return
     setBusy(true)
     setMsg('⏳ Đang lấy dữ liệu xem trước...')
     try {
-      const r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, loaiTangCa])
-      const data = r?.rows || []
-      setRows(data)
-      writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiTangCa })
-      setMsg(r?.message || `✅ Đã tải ${data.length} dòng xem trước.`)
+      const names = reportApiNames()
+      const args = reportType === 'Tăng ca' ? ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, loaiTangCa] : [requestPayload()]
+      const r = await api(names.preview, args)
+      const data = r?.rows || r || []
+      setRows(Array.isArray(data) ? data : [])
+      writeJson(cacheKey, { rows: Array.isArray(data) ? data : [], cachedAt: Date.now(), reportType })
+      setMsg(r?.message || `✅ Đã tải ${(Array.isArray(data) ? data : []).length} dòng xem trước.`)
     } catch (e) { setMsg(e.message || 'Không xem trước được.') }
     finally { setBusy(false) }
   }
@@ -1073,37 +1211,27 @@ function PrintOvertimeScreen({ session, departments }) {
     setBusy(true)
     setMsg('⏳ Đang tạo file Excel...')
     try {
-      const r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa }])
+      const names = reportApiNames()
+      const r = await api(names.exportAction, [requestPayload()])
       const url = r?.url || r?.fileUrl || r?.downloadUrl || ''
       setFileUrl(url)
-      setMsg(url ? `✅ Đã tạo file Excel (${loaiTangCa}). Có thể mở link hoặc gửi qua Zalo.` : '✅ Đã gửi yêu cầu xuất Excel.')
+      setMsg(url ? `✅ Đã tạo ${names.title}. Có thể mở link hoặc gửi qua Zalo.` : '✅ Đã gửi yêu cầu xuất Excel.')
       if (url) window.open(url, '_blank')
     } catch (e) { setMsg(`❌ Chưa xuất được Excel: ${e.message || 'Lỗi Apps Script.'}`) }
     finally { setBusy(false) }
   }
   async function shareZalo() {
     if (!fileUrl) { setMsg('❌ Chưa có link Excel để gửi.'); return }
-    const shareText = `File tăng ca: ${fileUrl}`
+    const shareText = `${reportApiNames().title}: ${fileUrl}`
     if (navigator.share) {
-      try {
-        await navigator.share({ title: 'File tăng ca', text: shareText, url: fileUrl })
-        setMsg('✅ Đã mở bảng chia sẻ. Chọn Zalo để gửi link.')
-        return
-      } catch (e) {
-        if (e && e.name === 'AbortError') return
-      }
+      try { await navigator.share({ title: reportApiNames().title, text: shareText, url: fileUrl }); setMsg('✅ Đã mở bảng chia sẻ. Chọn Zalo để gửi link.'); return } catch (e) { if (e && e.name === 'AbortError') return }
     }
-    try {
-      await navigator.clipboard.writeText(fileUrl)
-      setMsg('✅ Đã copy link. Mở Zalo và dán gửi cho người nhận.')
-    } catch (e) {
-      window.prompt('Copy link này để gửi qua Zalo:', fileUrl)
-      setMsg('✅ Hãy copy link rồi dán vào Zalo.')
-    }
+    try { await navigator.clipboard.writeText(fileUrl); setMsg('✅ Đã copy link. Mở Zalo và dán gửi cho người nhận.') } catch (e) { window.prompt('Copy link này để gửi qua Zalo:', fileUrl); setMsg('✅ Hãy copy link rồi dán vào Zalo.') }
   }
-  return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu lấy từ BAO_CAO_CHI_TIET. Có thể lọc: sáng, trưa, chiều, đột xuất hoặc tất cả.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={(r.maNv || '') + '_' + i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.chiTiet || loaiTangCa}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
+  const previewCells = (r) => [r.maNv || r.MA_NV || '', r.tenNv || r.TEN_NV || '', r.boPhanGoc || r.boPhan || r.BO_PHAN_GOC || '', r.chiTiet || r.CHI_TIET || r.loaiBaoCao || reportType, r.tong || r.soGio || r.trangThai || '']
+  return <><div className="screen-title-row"><span className="screen-title-icon">📄</span><h1>In báo cáo</h1></div><div className="card print-overtime-card print-report-card"><label className="field-label">Loại báo cáo</label><select className="form-control form-control-sm" value={reportType} onChange={e => setReportType(e.target.value)}>{reportTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select>{reportType === 'Tăng ca' && <><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select></>}<div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước báo cáo</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={(r.maNv || r.MA_NV || '') + '_' + i}>{previewCells(r).map((c, idx) => <td key={idx}>{c}</td>)}</tr>)}</tbody></table></div>}</div></>
 }
-function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
+function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'dang-ky-ngay-le') return <HolidayWorkScreen session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
   const savedSession = readJson(SESSION_KEY, null)
   const [booting, setBooting] = useState(true)
