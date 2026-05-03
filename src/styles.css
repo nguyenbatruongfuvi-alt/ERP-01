@@ -1827,34 +1827,3 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
   box-shadow: 0 8px 18px rgba(217, 45, 32, .22) !important;
 }
 .retention b { font-weight: 900; }
-
-/* =========================
-   ERP V30.39 - Report/Holiday UI extension
-   Giữ nền tảng cũ, chỉ bổ sung module.
-   ========================= */
-.clickable-row { cursor: pointer; }
-.clickable-row:active { background: #ecfdf3; }
-.report-child-body { padding: 14px; overflow: auto; }
-.report-child-panel .modal-head-lite b { font-size: 22px !important; }
-.absence-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
-.absence-kpi { min-height: 76px; border: 1px solid var(--color-border); border-radius: var(--radius-md); display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; }
-.absence-kpi.active { border-bottom: 4px solid var(--color-primary); }
-.absence-kpi span { font-size: 13px; font-weight: 800; text-align: center; }
-.absence-kpi b { margin-top: 5px; font-size: 24px; font-weight: 900; }
-.filter-pills { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0; padding-bottom: 4px; }
-.filter-pills button { flex: 0 0 auto; border: 1px solid var(--color-border); background: white; color: var(--color-text); border-radius: 12px; min-height: 44px; padding: 0 12px; font-size: 14px; font-weight: 800; }
-.filter-pills button.active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
-.absence-table-wrap { margin-top: 12px; }
-.absence-table { min-width: 520px; }
-.absence-badge { display: inline-block; padding: 5px 8px; border-radius: 9px; background: #fff7e6; color: var(--color-orange); font-weight: 850; }
-.holiday-card .pick-section-row { margin-top: 12px; }
-.holiday-list { max-height: 360px; overflow: auto; margin-bottom: 12px; }
-.holiday-person-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border-bottom: 1px solid var(--color-border); background: white; }
-.holiday-person-row:last-child { border-bottom: 0; }
-.holiday-person-row.selected { background: #ecfdf3; border-left: 5px solid var(--color-primary); }
-.holiday-person-row b { font-size: 16px; font-weight: 900; }
-.holiday-help { margin: 10px 0 0; }
-.report-export-card .form-control-sm { min-height: 48px; }
-.report-action-box { margin: 12px 0; padding: 12px; border-radius: var(--radius-md); background: var(--color-soft-green); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.report-action-box b { color: var(--color-primary); font-size: 15px; }
-.excel-link-box { margin-top: 8px; padding: 10px; border-radius: 10px; background: #f3f4f6; word-break: break-all; font-size: 13px; color: var(--color-muted); }
