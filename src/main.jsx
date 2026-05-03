@@ -7,9 +7,9 @@ const API_KEY = ''
 const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
 const CACHE_KEY = 'erp_v30_client_cache'
-const DRAFT_PREFIX = 'erp_v30_draft_v12'
+const DRAFT_PREFIX = 'erp_v30_draft_v13'
 const LOCAL_SAVE_PREFIX = 'erp_v30_local_first_v27'
-const PRELOAD_PREFIX = 'erp_v30_today_preload_v27'
+const PRELOAD_PREFIX = 'erp_v30_today_preload_v28'
 const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
@@ -655,7 +655,7 @@ function normalizeRow(row) {
 function mergeBundleRows(bundle, staff, session, type, title) {
   const cacheRows = bundle?.cache?.nhanSuBoPhan || staff || []
   const bundleRows = (bundle?.items || []).map(normalizeRow)
-  const saved = bundleRows.filter(x => x.selected === true)
+  const saved = bundleRows.filter(x => x.selected === true && (type !== 'Tăng ca' || x.batDau || x.ketThuc || x.soGio))
   const savedMap = new Map(saved.map(x => [x.maNv, x]))
   const hasSavedBefore = bundle?.hasSavedBefore === true || saved.length > 0
 
@@ -666,6 +666,12 @@ function mergeBundleRows(bundle, staff, session, type, title) {
   const baseSet = new Set(base.map(x => x.maNv))
   saved.forEach(x => { if (!baseSet.has(x.maNv)) base.push({ ...x, selected: true, outside: true }) })
 
+  // Riêng Tăng ca: nếu chưa có dữ liệu đã lưu thật sự kèm giờ tăng ca,
+  // không lấy trạng thái chọn từ cache/draft cũ để tránh mở ra bị chọn sẵn toàn bộ.
+  if (type === 'Tăng ca' && !hasSavedBefore) {
+    return { rows: base.map(p => ({ ...p, selected: false, trangThai: '' })), batDau: '', ketThuc: '', soGio: '', hasSavedBefore: false }
+  }
+
   const localDraft = readJson(draftKeyFor(session, type, title), null)
   if (!hasSavedBefore && localDraft && Array.isArray(localDraft.items)) {
     const draftMap = new Map(localDraft.items.map(x => [x.maNv, x]))
@@ -673,7 +679,7 @@ function mergeBundleRows(bundle, staff, session, type, title) {
     return { rows: base.slice().sort((a,b)=>(b.selected?1:0)-(a.selected?1:0)), batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
   }
 
-  if (type === 'Tăng ca' && !hasSavedBefore) base = base.map(p => ({ ...p, selected: true }))
+  // Không tự động chọn sẵn nhân viên cho mục Tăng ca.
   const first = saved.find(x => x.batDau || x.ketThuc || x.soGio) || saved[0] || {}
   // Luôn đưa người đã lưu/đã chọn lên đầu để mở lại nhìn thấy ngay.
   const selectedOrder = new Set(saved.filter(x => x.selected !== false).map(x => x.maNv))
@@ -960,13 +966,39 @@ function fromInputDate(v) { if (!v) return ''; const [yy, mm, dd] = v.split('-')
 function monthStartInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01` }
 function monthEndInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(new Date(d.getFullYear(), d.getMonth()+1, 0).getDate())}` }
 function PrintOvertimeScreen({ session, departments }) {
+  const overtimeTypes = ['Tất cả', 'Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']
   const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả'), [thang, setThang] = useState(monthNow())
+  const [loaiTangCa, setLoaiTangCa] = useState('Tất cả')
   const [tuNgay, setTuNgay] = useState(monthStartInput()), [denNgay, setDenNgay] = useState(monthEndInput()), [busy, setBusy] = useState(false), [fileUrl, setFileUrl] = useState('')
-  const cacheKey = localKey('in_tang_ca_preview', [bp, tuNgay, denNgay, thang])
-  useEffect(() => { const cached = readJson(cacheKey, null); if (cached?.rows) { setRows(cached.rows); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } }, [bp, tuNgay, denNgay, thang])
+  const cacheKey = localKey('in_tang_ca_preview', [bp, loaiTangCa, tuNgay, denNgay, thang])
+  useEffect(() => { const cached = readJson(cacheKey, null); if (cached?.rows) { setRows(cached.rows); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } }, [bp, loaiTangCa, tuNgay, denNgay, thang])
   function validateRange() { if (tuNgay && denNgay && tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return false } return true }
-  async function load() { if (!validateRange()) return; setBusy(true); setMsg('⏳ Đang lấy dữ liệu xem trước...'); try { const r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang]); const data = r?.rows || []; setRows(data); writeJson(cacheKey, { rows: data, cachedAt: Date.now() }); setMsg(r?.message || `✅ Đã tải ${data.length} dòng xem trước.`) } catch (e) { setMsg(e.message || 'Không xem trước được.') } finally { setBusy(false) } }
-  async function exportExcel() { if (!validateRange()) return; setBusy(true); setMsg('⏳ Đang tạo file Excel...'); try { const r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang }]); const url = r?.url || r?.fileUrl || r?.downloadUrl || ''; setFileUrl(url); setMsg(url ? '✅ Đã tạo file Excel. Có thể mở link hoặc gửi qua Zalo.' : '✅ Đã gửi yêu cầu xuất Excel.') ; if (url) window.open(url, '_blank') } catch (e) { setMsg(`❌ Chưa xuất được Excel: ${e.message || 'Lỗi Apps Script.'}`) } finally { setBusy(false) } }
+  async function load() {
+    if (!validateRange()) return
+    setBusy(true)
+    setMsg('⏳ Đang lấy dữ liệu xem trước...')
+    try {
+      const r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, loaiTangCa])
+      const data = r?.rows || []
+      setRows(data)
+      writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiTangCa })
+      setMsg(r?.message || `✅ Đã tải ${data.length} dòng xem trước.`)
+    } catch (e) { setMsg(e.message || 'Không xem trước được.') }
+    finally { setBusy(false) }
+  }
+  async function exportExcel() {
+    if (!validateRange()) return
+    setBusy(true)
+    setMsg('⏳ Đang tạo file Excel...')
+    try {
+      const r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa }])
+      const url = r?.url || r?.fileUrl || r?.downloadUrl || ''
+      setFileUrl(url)
+      setMsg(url ? `✅ Đã tạo file Excel (${loaiTangCa}). Có thể mở link hoặc gửi qua Zalo.` : '✅ Đã gửi yêu cầu xuất Excel.')
+      if (url) window.open(url, '_blank')
+    } catch (e) { setMsg(`❌ Chưa xuất được Excel: ${e.message || 'Lỗi Apps Script.'}`) }
+    finally { setBusy(false) }
+  }
   async function shareZalo() {
     if (!fileUrl) { setMsg('❌ Chưa có link Excel để gửi.'); return }
     const shareText = `File tăng ca: ${fileUrl}`
@@ -987,7 +1019,7 @@ function PrintOvertimeScreen({ session, departments }) {
       setMsg('✅ Hãy copy link rồi dán vào Zalo.')
     }
   }
-  return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu 45 ngày gần nhất.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={r.maNv || i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
+  return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu lấy từ BAO_CAO_CHI_TIET. Có thể lọc: sáng, trưa, chiều, đột xuất hoặc tất cả.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={(r.maNv || '') + '_' + i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.chiTiet || loaiTangCa}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
 }
 function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {

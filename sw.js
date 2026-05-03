@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v36-no-overtime-preselect';
+const CACHE_NAME = 'erp-v30-ui-shell-v37-overtime-filter';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {
