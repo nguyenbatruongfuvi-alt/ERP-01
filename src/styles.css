@@ -1829,50 +1829,32 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
 .retention b { font-weight: 900; }
 
 /* =========================
-   ERP V30.38 ADD-ON UI ONLY
-   1) Báo cáo công ty: nhấn bộ phận mở danh sách vắng.
-   2) Thêm Đăng ký làm ngày lễ.
-   3) Đổi In tăng ca thành In báo cáo.
+   ERP V30.39 - Report/Holiday UI extension
+   Giữ nền tảng cũ, chỉ bổ sung module.
    ========================= */
 .clickable-row { cursor: pointer; }
-.clickable-row:active, .clickable-row:hover { background: #ecfdf3; }
-.report-detail-modal .modal-head-lite { background: #fff; color: var(--color-text); }
-.report-modal-body { padding: 14px; overflow: auto; }
+.clickable-row:active { background: #ecfdf3; }
+.report-child-body { padding: 14px; overflow: auto; }
+.report-child-panel .modal-head-lite b { font-size: 22px !important; }
 .absence-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
-.absence-kpi { min-height: 78px; border: 1px solid var(--color-border); background: #fff; border-radius: var(--radius-md); font-weight: 800; }
-.absence-kpi span { display:block; font-size: 13px; }
-.absence-kpi b { display:block; margin-top: 7px; font-size: 24px; color: var(--color-orange); }
-.absence-kpi.active { border-color: var(--color-primary); box-shadow: inset 0 -4px 0 var(--color-primary); }
-.filter-row { display: flex; gap: 8px; overflow-x: auto; margin: 8px 0 10px; }
-.filter-row button { white-space: nowrap; min-height: 38px; border: 1px solid var(--color-border); border-radius: 11px; background: #fff; padding: 0 12px; font-weight: 800; }
-.filter-row button.active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
+.absence-kpi { min-height: 76px; border: 1px solid var(--color-border); border-radius: var(--radius-md); display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; }
+.absence-kpi.active { border-bottom: 4px solid var(--color-primary); }
+.absence-kpi span { font-size: 13px; font-weight: 800; text-align: center; }
+.absence-kpi b { margin-top: 5px; font-size: 24px; font-weight: 900; }
+.filter-pills { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0; padding-bottom: 4px; }
+.filter-pills button { flex: 0 0 auto; border: 1px solid var(--color-border); background: white; color: var(--color-text); border-radius: 12px; min-height: 44px; padding: 0 12px; font-size: 14px; font-weight: 800; }
+.filter-pills button.active { background: var(--color-primary); color: white; border-color: var(--color-primary); }
 .absence-table-wrap { margin-top: 12px; }
-.absence-table { min-width: 560px; }
-.absence-badge { display:inline-block; border-radius: 8px; padding: 4px 7px; background: #fff7e6; color: #b54708; font-weight: 850; font-size: 12px; }
-
-.screen-title-row { display:flex; align-items:center; gap:10px; margin: 0 0 12px; }
-.screen-title-row h1 { margin:0; font-size: 22px; line-height:1.1; font-weight: 900; }
-.screen-title-icon { width:40px; height:40px; border-radius:12px; background:#ecfdf3; display:flex; align-items:center; justify-content:center; font-size:23px; }
-.holiday-card h2 { margin-top: 0; font-size: 17px !important; font-weight: 900 !important; }
-.accordion-title { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom: 10px; font-size: 16px; }
-.accordion-title span { min-width: 42px; height: 36px; border-radius: 12px; background:#dcfce7; color: var(--color-primary); display:flex; align-items:center; justify-content:center; font-weight: 900; }
-.holiday-list { margin-top: 10px; border:1px solid var(--color-border); border-radius: var(--radius-md); overflow:hidden; background:#fff; max-height: 420px; overflow-y:auto; }
-.holiday-person-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 12px; border-bottom:1px solid var(--color-border); }
-.holiday-person-row:last-child { border-bottom:0; }
-.holiday-person-row b { font-size: 16px; }
-.holiday-person-row button { flex:0 0 auto; min-width: 86px; height: 42px; border:0; border-radius: 12px; background: var(--color-primary); color:#fff; font-weight: 900; }
-.holiday-person-row button.selected { background:#fff7e6; color:#b42318; border:1px solid #ffd28a; }
-.sticky-save-button { position: sticky; bottom: 10px; z-index: 8; margin: 4px 0 8px; }
-
-.print-report-card select.form-control-sm, .print-report-card input.form-control-sm { min-height: 48px; }
-.report-action-box { display:flex; align-items:center; justify-content:space-between; gap: 10px; margin: 14px 0 10px; padding: 12px; border-radius: var(--radius-md); background:#f0fdf4; border:1px solid #dcfce7; }
-.report-action-box b { color: var(--color-primary); }
-.report-action-box .secondary-button { width:auto; min-width: 116px; }
-.report-help { margin-top: 18px !important; background:#f8fafc !important; border-color:#e5e7eb !important; color: var(--color-text) !important; }
-
-@media (max-width: 520px) {
-  .absence-kpi-grid { grid-template-columns: repeat(3, minmax(104px, 1fr)); overflow-x:auto; }
-  .report-modal-body { padding: 12px; }
-  .holiday-person-row { padding: 11px 10px; }
-  .holiday-person-row button { min-width: 78px; }
-}
+.absence-table { min-width: 520px; }
+.absence-badge { display: inline-block; padding: 5px 8px; border-radius: 9px; background: #fff7e6; color: var(--color-orange); font-weight: 850; }
+.holiday-card .pick-section-row { margin-top: 12px; }
+.holiday-list { max-height: 360px; overflow: auto; margin-bottom: 12px; }
+.holiday-person-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border-bottom: 1px solid var(--color-border); background: white; }
+.holiday-person-row:last-child { border-bottom: 0; }
+.holiday-person-row.selected { background: #ecfdf3; border-left: 5px solid var(--color-primary); }
+.holiday-person-row b { font-size: 16px; font-weight: 900; }
+.holiday-help { margin: 10px 0 0; }
+.report-export-card .form-control-sm { min-height: 48px; }
+.report-action-box { margin: 12px 0; padding: 12px; border-radius: var(--radius-md); background: var(--color-soft-green); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.report-action-box b { color: var(--color-primary); font-size: 15px; }
+.excel-link-box { margin-top: 8px; padding: 10px; border-radius: 10px; background: #f3f4f6; word-break: break-all; font-size: 13px; color: var(--color-muted); }

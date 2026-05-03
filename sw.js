@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v38-report-holiday';
+const CACHE_NAME = 'erp-v30-ui-shell-v39-report-holiday';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {
