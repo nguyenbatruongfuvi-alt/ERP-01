@@ -179,23 +179,46 @@ function updateQueuedItem(id, patch) {
   writeJson(OFFLINE_QUEUE_KEY, q.map(x => (x.id === id || x.requestId === id) ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x))
   window.dispatchEvent(new Event('erp-queue-change'))
 }
+let syncQueueRunning = false
 async function syncQueue() {
+  if (syncQueueRunning) return 0
   let q = readJson(OFFLINE_QUEUE_KEY, [])
-  if (!q.length || !navigator.onLine) return 0
+  if (!q.length || !navigator.onLine) {
+    window.dispatchEvent(new Event('erp-queue-change'))
+    return 0
+  }
+  syncQueueRunning = true
   let synced = 0
   const remain = []
-  for (const item of q) {
-    try {
-      updateQueuedItem(item.id, { status: 'syncing', tries: Number(item.tries || 0) + 1 })
-      await api(item.action, item.args)
-      synced += 1
-    } catch (e) {
-      remain.push({ ...item, status: 'error', error: e?.message || 'Chưa đồng bộ được', tries: Number(item.tries || 0) + 1, updatedAt: new Date().toISOString() })
+  try {
+    for (const item of q) {
+      const tries = Number(item.tries || 0) + 1
+      try {
+        updateQueuedItem(item.id, { status: 'syncing', tries })
+        await api(item.action, item.args)
+        synced += 1
+      } catch (e) {
+        remain.push({
+          ...item,
+          status: tries >= 20 ? 'error' : 'pending',
+          error: e?.message || 'Chưa đồng bộ được',
+          tries,
+          updatedAt: new Date().toISOString()
+        })
+      }
     }
+    writeJson(OFFLINE_QUEUE_KEY, remain)
+    writeJson('erp_v30_last_sync_state', {
+      at: new Date().toISOString(),
+      synced,
+      remain: remain.length,
+      online: navigator.onLine
+    })
+    window.dispatchEvent(new Event('erp-queue-change'))
+    return synced
+  } finally {
+    syncQueueRunning = false
   }
-  writeJson(OFFLINE_QUEUE_KEY, remain)
-  window.dispatchEvent(new Event('erp-queue-change'))
-  return synced
 }
 function getLocalCount(boPhan, loai, title) {
   const pre = getPreloadedToday(boPhan)
@@ -244,6 +267,16 @@ function networkStateText() {
   if (!q.total) return 'Đã đồng bộ'
   if (q.error) return `Chờ đồng bộ: ${q.total} / lỗi: ${q.error}`
   return `Chờ đồng bộ: ${q.total}`
+}
+
+async function syncAndRefresh(boPhan, setCache) {
+  const synced = await syncQueue()
+  if (synced > 0 && boPhan && navigator.onLine) {
+    const data = await refreshTodayData(boPhan).catch(() => null)
+    const merged = data ? applyPreloadToCache(boPhan, data) : null
+    if (merged && setCache) setCache(merged)
+  }
+  return synced
 }
 
 function MenuContent({ onSelect, syncCount, onLogout }) {
@@ -844,16 +877,20 @@ function App() {
 
   useEffect(() => {
     const updateCount = () => setSyncCount(readJson(OFFLINE_QUEUE_KEY, []).length)
-    const run = () => syncQueue().then(updateCount).catch(updateCount)
+    const run = () => {
+      updateCount()
+      if (!navigator.onLine || !readJson(OFFLINE_QUEUE_KEY, []).length) return Promise.resolve(0)
+      return syncAndRefresh(session?.boPhan || readJson(LAST_DEPT_KEY, ''), setCache).then(updateCount).catch(updateCount)
+    }
     const onVisible = () => { if (document.visibilityState === 'visible') run() }
     window.addEventListener('online', run)
     window.addEventListener('focus', run)
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('erp-queue-change', updateCount)
-    const t = setInterval(run, 15000)
+    const t = setInterval(run, 5000)
     run()
     return () => { window.removeEventListener('online', run); window.removeEventListener('focus', run); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('erp-queue-change', updateCount); clearInterval(t) }
-  }, [])
+  }, [session?.boPhan])
   function handleSession(info) { setSession(info); setScreen('home') }
   function logout() { clearJson(SESSION_KEY); setSession(null); setScreen('login') }
   if (booting) return <div className="app-shell"><BootSplash text={bootText} /></div>
