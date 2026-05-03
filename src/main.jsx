@@ -47,8 +47,8 @@ function personSearchText(p) {
 
 const menuGroups = [
   { title: 'BÁO CÁO', items: [{ id: 'bao-cao', icon: '📋', label: 'Báo cáo bộ phận' }, { id: 'tong-cty', icon: '📊', label: 'Báo cáo công ty' }] },
-  { title: 'NHẬP LIỆU', items: [{ id: 'tang-ca', icon: '🕒', label: 'Tăng ca' }, { id: 'bien-dong', icon: '👥', label: 'Biến động' }, { id: 'vang', icon: '🧾', label: 'Vắng mặt' }, { id: 'giao-viec', icon: '📝', label: 'Giao việc' }] },
-  { title: 'TIỆN ÍCH', items: [{ id: 'in-tang-ca', icon: '🖨️', label: 'In tăng ca' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
+  { title: 'NHẬP LIỆU', items: [{ id: 'tang-ca', icon: '🕒', label: 'Tăng ca' }, { id: 'bien-dong', icon: '👥', label: 'Biến động' }, { id: 'vang', icon: '🧾', label: 'Vắng mặt' }, { id: 'dang-ky-le', icon: '🗓️', label: 'Đăng ký làm ngày lễ' }, { id: 'giao-viec', icon: '📝', label: 'Giao việc' }] },
+  { title: 'TIỆN ÍCH', items: [{ id: 'in-bao-cao', icon: '🖨️', label: 'In báo cáo' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
 ]
 
 function markOfflineError(err) {
@@ -553,6 +553,7 @@ function CompanyScreen({ session }) {
   const initialCache = findCompanyReportCache(today())
   const [data, setData] = useState(() => initialCache?.data || defaultCompanyData)
   const [msg, setMsg] = useState(() => initialCache?.data ? '⚡ Đang hiển thị dữ liệu đã lưu trên máy.' : '')
+  const [absenceDept, setAbsenceDept] = useState(null)
   useEffect(() => {
     const loadLocal = () => {
       const local = findCompanyReportCache(today())
@@ -593,8 +594,58 @@ function CompanyScreen({ session }) {
   }, [session?.boPhan])
   const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
   return <><div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
-    <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={r.boPhan || i}><td>{i + 1}</td><td>{r.boPhan}</td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td></tr>)}</tbody></table></div><Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} /></div></>
+    <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr className="clickable-row" key={r.boPhan || i} onClick={() => setAbsenceDept(r)}><td>{i + 1}</td><td>{r.boPhan}</td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td></tr>)}</tbody></table></div><Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} /></div>{absenceDept && <AbsenceDeptModal deptRow={absenceDept} onClose={() => setAbsenceDept(null)} />}</>
 }
+
+function AbsenceDeptModal({ deptRow, onClose }) {
+  const [filter, setFilter] = useState('Tất cả')
+  const [rows, setRows] = useState([])
+  const [msg, setMsg] = useState('Đang hiển thị dữ liệu tổng hợp từ báo cáo vắng mặt.')
+  const boPhan = deptRow?.boPhan || ''
+  const counts = {
+    'Vắng sáng': Number(deptRow?.vangBuoiSang || deptRow?.vangSang || 0),
+    'Vắng chiều': Number(deptRow?.vangBuoiChieu || deptRow?.vangChieu || 0),
+    'Vắng cả ngày': Number(deptRow?.vangCaNgay || 0),
+  }
+  useEffect(() => {
+    let alive = true
+    const key = localKey('vang_bo_phan_detail', [today(), boPhan])
+    const cached = readJson(key, null)
+    if (cached?.rows) { setRows(cached.rows); setMsg('⚡ Đang hiển thị dữ liệu đã lưu trên máy.') }
+    if (!navigator.onLine) return
+    api('getDanhSachVangBoPhan', [today(), boPhan]).then(r => {
+      if (!alive) return
+      const data = r?.rows || r || []
+      if (Array.isArray(data)) {
+        setRows(data)
+        writeJson(key, { rows: data, cachedAt: Date.now() })
+        setMsg(`✅ Đã tải ${data.length} nhân viên vắng.`)
+      }
+    }).catch(() => {
+      if (!cached?.rows) setMsg('ℹ️ Chưa có API chi tiết. Đang hiển thị số liệu tổng hợp của bộ phận.')
+    })
+    return () => { alive = false }
+  }, [boPhan])
+  const normalized = rows.map((r, i) => ({
+    stt: r.stt || i + 1,
+    maNv: r.maNv || r.ma || '',
+    tenNv: r.tenNv || r.ten || r.hoTen || '',
+    loaiVang: r.loaiVang || r.chiTiet || r.loai || r.trangThai || '',
+  }))
+  const shown = filter === 'Tất cả' ? normalized : normalized.filter(x => stripVietnamese(x.loaiVang).includes(stripVietnamese(filter)))
+  return <div className="modal-overlay"><div className="modal-panel report-detail-modal">
+    <div className="modal-head-lite"><b>Danh sách vắng - {boPhan}</b><button onClick={onClose}>×</button></div>
+    <div className="report-modal-body">
+      <div className="absence-kpi-grid">{Object.entries(counts).map(([label, value]) => <button key={label} className={`absence-kpi ${filter === label ? 'active' : ''}`} onClick={() => setFilter(label)}><span>{label}</span><b>{value}</b></button>)}</div>
+      <div className="filter-row"><button className={filter === 'Tất cả' ? 'active' : ''} onClick={() => setFilter('Tất cả')}>Tất cả</button><button className={filter === 'Vắng sáng' ? 'active' : ''} onClick={() => setFilter('Vắng sáng')}>Vắng sáng</button><button className={filter === 'Vắng chiều' ? 'active' : ''} onClick={() => setFilter('Vắng chiều')}>Vắng chiều</button><button className={filter === 'Vắng cả ngày' ? 'active' : ''} onClick={() => setFilter('Vắng cả ngày')}>Vắng cả ngày</button></div>
+      <div className="small-text">Tổng số: {shown.length || (counts['Vắng sáng'] + counts['Vắng chiều'] + counts['Vắng cả ngày'])} nhân viên</div>
+      {shown.length > 0 ? <div className="table-scroll absence-table-wrap"><table className="summary-table absence-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Loại vắng</th></tr></thead><tbody>{shown.map((r, i) => <tr key={(r.maNv || '') + i}><td>{i + 1}</td><td>{r.maNv}</td><td>{r.tenNv}</td><td><span className="absence-badge">{r.loaiVang || filter}</span></td></tr>)}</tbody></table></div> : <div className="note-compact">ℹ️ Chưa có danh sách chi tiết nhân viên. Apps Script cần bổ sung action <b>getDanhSachVangBoPhan</b> để trả về danh sách theo bộ phận.</div>}
+      <div className="note-compact">ℹ️ Dữ liệu được tổng hợp từ báo cáo vắng mặt.<br />Cập nhật lần cuối: {new Date().toLocaleTimeString('vi-VN')} {today()}</div>
+      <button className="secondary-button" onClick={onClose}>Đóng</button>
+    </div>
+  </div></div>
+}
+
 function useStaff(session, cache) {
   const preload = session?.boPhan ? getPreloadedToday(session.boPhan) : null
   const cachedStaff = cache?.nhanSuBoPhan || preload?.cache?.nhanSuBoPhan || []
@@ -956,6 +1007,87 @@ function TaskScreen({ session }) {
   if (!manager) return <div className="card">{jobs.length ? jobs.map((j, i) => <div className="task-card" key={i}><div className="task-title">{j.tieuDe || j.tenCongViec || j.noiDung || 'Công việc'}</div><div className="meta-line">Trạng thái: <b>{j.trangThai || 'Đang chờ'}</b></div></div>) : <><p className="page-note">Danh sách công việc được giao.</p><div className="task-card"><div className="task-title">Chưa có công việc</div><div className="meta-line">Trạng thái: <b>Đang chờ</b></div></div></>}</div>
   return <><div className="screen-title-row"><span className="screen-title-icon">📝</span><h1>Giao việc</h1></div><div className="card task-form-card"><label className="field-label">Tổ trưởng</label><select className="form-control form-control-sm" value={leaderId} onChange={e => setLeaderId(e.target.value)}>{leaders.map((x, i) => <option key={i} value={String(x.maNv || x.ma || x.tenNv || x.ten || '')}>{leaderLabel(x)}</option>)}</select><label className="field-label">Tên công việc</label><input className="form-control form-control-sm" placeholder="Nhập tên công việc" value={tenCongViec} onChange={e => setTenCongViec(e.target.value)} /><label className="field-label">Nội dung công việc</label><div className="textarea-wrap"><textarea className="form-control task-textarea" maxLength={500} placeholder="Nhập nội dung chi tiết công việc" value={noiDung} onChange={e => setNoiDung(e.target.value)} /><span>{noiDung.length}/500</span></div><label className="field-label">Ngày hoàn thành</label><input className="form-control form-control-sm" value={han} onChange={e => setHan(e.target.value)} /><div className="note-compact">ℹ️ Công việc sẽ được lưu và thông báo cho Tổ trưởng.</div><button className="secondary-button" onClick={resetForm}>↻ Nhập lại</button><div style={{height:10}} /><button className={saveButtonClass('primary-button', msg, saving)} disabled={saving} onClick={saveTask}>💾 Lưu giao việc</button><Status text={msg} ok={!msg.includes('Vui lòng') && !msg.includes('Chưa')} /></div></>
 }
+
+function dateDiffInclusive(start, end) {
+  if (!start || !end || start > end) return 0
+  const s = new Date(start + 'T00:00:00')
+  const e = new Date(end + 'T00:00:00')
+  return Math.max(0, Math.round((e - s) / 86400000) + 1)
+}
+function getAllStaffFromCache(cache, session) {
+  const preload = session?.boPhan ? getPreloadedToday(session.boPhan) : null
+  const candidates = [
+    cache?.nhanSuTatCa,
+    cache?.allStaff,
+    cache?.danhSachNhanSu,
+    cache?.nhanSu,
+    preload?.cache?.nhanSuTatCa,
+    preload?.cache?.allStaff,
+    preload?.cache?.danhSachNhanSu,
+    preload?.cache?.nhanSu,
+    cache?.nhanSuBoPhan,
+    preload?.cache?.nhanSuBoPhan,
+  ]
+  for (const rows of candidates) if (Array.isArray(rows) && rows.length) return rows.map(normalizeRow)
+  return []
+}
+function HolidayWorkScreen({ session, cache }) {
+  const staff = useStaff(session, cache).map(normalizeRow)
+  const allStaff = getAllStaffFromCache(cache, session)
+  const [tuNgay, setTuNgay] = useState(monthStartInput())
+  const [denNgay, setDenNgay] = useState(monthStartInput())
+  const [selected, setSelected] = useState({})
+  const [search, setSearch] = useState('')
+  const [msg, setMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  const selectedRows = Object.values(selected)
+  const localDeptRows = staff.filter(p => sameDeptRow(p, session.boPhan))
+  const outsideRows = allStaff.filter(p => p.maNv && !sameDeptRow(p, session.boPhan) && !selected[p.maNv] && (!search || personSearchText(p).includes(stripVietnamese(search)))).slice(0, 80)
+  const dayCount = dateDiffInclusive(tuNgay, denNgay)
+  function toggle(p, outside = false) {
+    const row = normalizeRow(p)
+    if (!row.maNv) return
+    setSelected(old => {
+      const next = { ...old }
+      if (next[row.maNv]) delete next[row.maNv]
+      else next[row.maNv] = { ...row, selected: true, outside, boPhanGoc: row.boPhanGoc || row.boPhan || session.boPhan }
+      return next
+    })
+  }
+  async function saveHoliday() {
+    if (saving) return
+    if (!tuNgay || !denNgay || tuNgay > denNgay) { setMsg('❌ Vui lòng chọn khoảng ngày hợp lệ.'); return }
+    const requestId = `le_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    const payload = { requestId, ngay: today(), tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), soNgay: dayCount, boPhan: session.boPhan, toTruong: session.tenToTruong, loaiBaoCao: 'Làm ngày lễ', items: selectedRows }
+    setSaving(true)
+    writeJson(localKey('dang_ky_lam_ngay_le', [payload.tuNgay, payload.denNgay, session.boPhan]), { ...payload, localOnly: true, savedAt: new Date().toISOString() })
+    const n = queueSave('saveDangKyLamNgayLe', [payload], { requestId, screen: 'dang-ky-le' })
+    setMsg(`💾 ĐÃ LƯU TRÊN MÁY. Đang đồng bộ nền (${n}).`)
+    setSaving(false)
+    if (navigator.onLine) syncQueue().then(() => setMsg(readJson(OFFLINE_QUEUE_KEY, []).length ? '💾 Đã lưu trên máy, còn mục chờ đồng bộ.' : '✅ ĐÃ ĐỒNG BỘ ĐĂNG KÝ NGÀY LỄ.')).catch(() => setMsg('💾 Đã lưu trên máy. Sẽ tự đồng bộ khi mạng ổn.'))
+  }
+  return <>
+    <div className="screen-title-row"><span className="screen-title-icon">🗓️</span><h1>Đăng ký làm ngày lễ</h1></div>
+    <div className="card holiday-card">
+      <h2>1. Chọn ngày lễ</h2>
+      <div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div>
+      <div className="note-compact">ℹ️ Đã chọn: <b>{dayCount}</b> ngày ({fromInputDate(tuNgay)} - {fromInputDate(denNgay)})</div>
+    </div>
+    <div className="card holiday-card">
+      <div className="accordion-title"><b>2. Chọn nhân viên trong tổ ({session.boPhan})</b><span>{localDeptRows.length}</span></div>
+      <div className="holiday-list">{localDeptRows.map(p => <div className="holiday-person-row" key={p.maNv}><div><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan || session.boPhan}</div></div><button className={selected[p.maNv] ? 'selected' : ''} onClick={() => toggle(p, false)}>{selected[p.maNv] ? 'Bỏ chọn' : 'Chọn'}</button></div>)}</div>
+    </div>
+    <div className="card holiday-card">
+      <div className="accordion-title"><b>3. Thêm nhân viên từ bộ phận khác</b><span>{selectedRows.filter(x => x.outside).length}</span></div>
+      <input className="form-control form-control-sm" placeholder="🔎 Nhập tên, mã số (có dấu hoặc không dấu)..." value={search} onChange={e => setSearch(e.target.value)} />
+      <div className="holiday-list">{outsideRows.map(p => <div className="holiday-person-row" key={p.maNv}><div><b>{p.tenNv}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}</div></div><button onClick={() => toggle(p, true)}>Chọn</button></div>)}</div>
+    </div>
+    <button className={saveButtonClass('primary-button sticky-save-button', msg, saving)} disabled={saving} onClick={saveHoliday}>💾 Lưu ({selectedRows.length} nhân viên)</button>
+    <div className="note-compact">ℹ️ Danh sách chọn sẽ được đăng ký làm việc trong ngày lễ đã chọn.</div>
+    <Status text={msg} ok={!msg.includes('❌')} />
+  </>
+}
+
 function toInputDate(v) {
   const d = new Date()
   if (!v) return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
@@ -965,63 +1097,74 @@ function toInputDate(v) {
 function fromInputDate(v) { if (!v) return ''; const [yy, mm, dd] = v.split('-'); return `${dd}/${mm}/${yy}` }
 function monthStartInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01` }
 function monthEndInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(new Date(d.getFullYear(), d.getMonth()+1, 0).getDate())}` }
-function PrintOvertimeScreen({ session, departments }) {
+
+function PrintReportScreen({ session, departments }) {
+  const reportTypes = [
+    { value: 'Tăng ca', label: 'Tăng ca' },
+    { value: 'Làm ngày lễ', label: 'Làm ngày lễ' },
+    { value: 'Chuyển bộ phận', label: 'Chuyển bộ phận' },
+  ]
   const overtimeTypes = ['Tất cả', 'Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']
+  const [loaiBaoCao, setLoaiBaoCao] = useState('Tăng ca')
   const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả'), [thang, setThang] = useState(monthNow())
   const [loaiTangCa, setLoaiTangCa] = useState('Tất cả')
   const [tuNgay, setTuNgay] = useState(monthStartInput()), [denNgay, setDenNgay] = useState(monthEndInput()), [busy, setBusy] = useState(false), [fileUrl, setFileUrl] = useState('')
-  const cacheKey = localKey('in_tang_ca_preview', [bp, loaiTangCa, tuNgay, denNgay, thang])
-  useEffect(() => { const cached = readJson(cacheKey, null); if (cached?.rows) { setRows(cached.rows); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } }, [bp, loaiTangCa, tuNgay, denNgay, thang])
+  const showLoaiTangCa = loaiBaoCao === 'Tăng ca'
+  const cacheKey = localKey('in_bao_cao_preview', [loaiBaoCao, bp, showLoaiTangCa ? loaiTangCa : 'none', tuNgay, denNgay, thang])
+  useEffect(() => { const cached = readJson(cacheKey, null); if (cached?.rows) { setRows(cached.rows); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } }, [cacheKey])
   function validateRange() { if (tuNgay && denNgay && tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return false } return true }
+  function payload() { return { loaiBaoCao, boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' } }
   async function load() {
     if (!validateRange()) return
-    setBusy(true)
-    setMsg('⏳ Đang lấy dữ liệu xem trước...')
+    setBusy(true); setMsg('⏳ Đang lấy dữ liệu xem trước...')
     try {
-      const r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, loaiTangCa])
-      const data = r?.rows || []
-      setRows(data)
-      writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiTangCa })
-      setMsg(r?.message || `✅ Đã tải ${data.length} dòng xem trước.`)
+      let r
+      if (loaiBaoCao === 'Tăng ca') r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang, loaiTangCa])
+      else r = await api('getBaoCaoXemTruoc', [payload()])
+      const data = r?.rows || r || []
+      const arr = Array.isArray(data) ? data : []
+      setRows(arr)
+      writeJson(cacheKey, { rows: arr, cachedAt: Date.now(), payload: payload() })
+      setMsg(r?.message || `✅ Đã tải ${arr.length} dòng xem trước.`)
     } catch (e) { setMsg(e.message || 'Không xem trước được.') }
     finally { setBusy(false) }
   }
   async function exportExcel() {
     if (!validateRange()) return
-    setBusy(true)
-    setMsg('⏳ Đang tạo file Excel...')
+    setBusy(true); setMsg('⏳ Đang tạo file Excel...')
     try {
-      const r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa }])
+      let r
+      if (loaiBaoCao === 'Tăng ca') r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang, loaiTangCa }])
+      else r = await api('exportBaoCaoExcel', [payload()])
       const url = r?.url || r?.fileUrl || r?.downloadUrl || ''
       setFileUrl(url)
-      setMsg(url ? `✅ Đã tạo file Excel (${loaiTangCa}). Có thể mở link hoặc gửi qua Zalo.` : '✅ Đã gửi yêu cầu xuất Excel.')
+      setMsg(url ? `✅ Đã tạo file Excel: ${loaiBaoCao}.` : '✅ Đã gửi yêu cầu xuất Excel.')
       if (url) window.open(url, '_blank')
     } catch (e) { setMsg(`❌ Chưa xuất được Excel: ${e.message || 'Lỗi Apps Script.'}`) }
     finally { setBusy(false) }
   }
   async function shareZalo() {
     if (!fileUrl) { setMsg('❌ Chưa có link Excel để gửi.'); return }
-    const shareText = `File tăng ca: ${fileUrl}`
     if (navigator.share) {
-      try {
-        await navigator.share({ title: 'File tăng ca', text: shareText, url: fileUrl })
-        setMsg('✅ Đã mở bảng chia sẻ. Chọn Zalo để gửi link.')
-        return
-      } catch (e) {
-        if (e && e.name === 'AbortError') return
-      }
+      try { await navigator.share({ title: `File ${loaiBaoCao}`, text: `File ${loaiBaoCao}: ${fileUrl}`, url: fileUrl }); setMsg('✅ Đã mở bảng chia sẻ.'); return } catch (e) { if (e?.name === 'AbortError') return }
     }
-    try {
-      await navigator.clipboard.writeText(fileUrl)
-      setMsg('✅ Đã copy link. Mở Zalo và dán gửi cho người nhận.')
-    } catch (e) {
-      window.prompt('Copy link này để gửi qua Zalo:', fileUrl)
-      setMsg('✅ Hãy copy link rồi dán vào Zalo.')
-    }
+    try { await navigator.clipboard.writeText(fileUrl); setMsg('✅ Đã copy link. Mở Zalo và dán gửi cho người nhận.') } catch { window.prompt('Copy link này để gửi qua Zalo:', fileUrl) }
   }
-  return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu lấy từ BAO_CAO_CHI_TIET. Có thể lọc: sáng, trưa, chiều, đột xuất hoặc tất cả.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={(r.maNv || '') + '_' + i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.chiTiet || loaiTangCa}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
+  return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>Xuất báo cáo</h1></div><div className="card print-overtime-card print-report-card">
+    <label className="field-label">Loại báo cáo</label><select className="form-control form-control-sm" value={loaiBaoCao} onChange={e => { setLoaiBaoCao(e.target.value); setRows([]); setFileUrl(''); setMsg('') }}>{reportTypes.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select>
+    <label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select>
+    {showLoaiTangCa ? <><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select></> : <div className="note-compact">🙈 Không hiển thị “Loại tăng ca” khi chọn báo cáo {loaiBaoCao}.</div>}
+    <div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div>
+    <label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} />
+    <div className="report-action-box"><div><b>👁️ Xem trước báo cáo</b><div className="small-text">Xem trước dữ liệu trước khi xuất file</div></div><button className="secondary-button mini" disabled={busy} onClick={load}>Xem trước ›</button></div>
+    <button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>
+    <div className="note-compact">ℹ️ Dữ liệu xuất ra sẽ hiển thị theo các bộ lọc bạn đã chọn.</div>
+    {fileUrl && <><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}
+    <Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />
+    {rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={(r.maNv || '') + '_' + i}><td>{r.maNv || r.ma || ''}</td><td>{r.tenNv || r.ten || r.hoTen || ''}</td><td>{r.boPhanGoc || r.boPhan || ''}</td><td>{r.chiTiet || r.loai || loaiBaoCao}</td><td>{r.tong || r.soGio || r.soNgay || ''}</td></tr>)}</tbody></table></div>}
+  </div><div className="note-compact report-help"><b>💡 Ghi chú:</b><br />• Trường “Loại tăng ca” chỉ hiện khi chọn loại báo cáo là “Tăng ca”.<br />• Khi chọn “Làm ngày lễ” hoặc “Chuyển bộ phận”, hệ thống tự ẩn trường không liên quan.</div></>
 }
-function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
+function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'dang-ky-le') return <HolidayWorkScreen session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-bao-cao' || screen === 'in-tang-ca') return <PrintReportScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
   const savedSession = readJson(SESSION_KEY, null)
   const [booting, setBooting] = useState(true)
