@@ -14,28 +14,27 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const APP_VERSION = 'V30.38_CACHE_GUARD'
+const APP_VERSION = 'V30.40_API_CALL_FULL_CLEAN_STRUCTURE'
 const APP_VERSION_KEY = 'erp_v30_app_version'
 let SYNC_QUEUE_RUNNING = false
 
-// V30.38: Chống kẹt cache trắng màn hình sau deploy.
+// V30.40: Chống kẹt cache trắng màn hình sau deploy.
 // Chỉ xóa Cache Storage/app shell cũ, KHÔNG xóa localStorage nghiệp vụ/offline queue.
 (function guardAppVersion() {
   try {
     const savedVersion = localStorage.getItem(APP_VERSION_KEY)
     if (savedVersion === APP_VERSION) return
     localStorage.setItem(APP_VERSION_KEY, APP_VERSION)
-
-    // Không phá chế độ offline: nếu mất mạng, giữ bản đang có để người dùng vẫn mở được app.
     if (!navigator.onLine) return
 
+    const alreadyReloaded = sessionStorage.getItem('erp_v30_cache_guard_reloaded') === APP_VERSION
     const reloadOnce = () => {
+      if (alreadyReloaded) return
       try {
         sessionStorage.setItem('erp_v30_cache_guard_reloaded', APP_VERSION)
         window.location.reload()
       } catch {}
     }
-    const alreadyReloaded = sessionStorage.getItem('erp_v30_cache_guard_reloaded') === APP_VERSION
 
     const clearShellCaches = async () => {
       if ('serviceWorker' in navigator) {
@@ -48,11 +47,25 @@ let SYNC_QUEUE_RUNNING = false
       }
     }
 
-    clearShellCaches().finally(() => {
-      if (!alreadyReloaded) reloadOnce()
-    })
+    clearShellCaches().finally(reloadOnce)
   } catch {}
 })()
+
+// V30.39 API CALL FULL FIX: gom request trùng + chặn gọi API lặp quá dày.
+const API_INFLIGHT = new Map()
+const API_LAST_SUCCESS = new Map()
+const API_MIN_GAP_MS = {
+  getLoginInitFast: 120000,
+  getTodayBootstrapV318: 45000,
+  getClientCache: 60000,
+  getBaoCaoTongCongTy: 45000,
+}
+const TODAY_REFRESH_INFLIGHT = new Map()
+const TODAY_REFRESH_LAST = new Map()
+function stableApiKey(action, args = []) {
+  return action + '::' + JSON.stringify(args || [])
+}
+function apiMinGap(action) { return API_MIN_GAP_MS[action] || 0 }
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -139,7 +152,7 @@ function apiJsonp(action, args = []) {
   })
 }
 
-async function api(action, args = []) {
+async function apiRaw(action, args = []) {
   if (!navigator.onLine) throw markOfflineError('Máy đang offline thật.')
 
   // V30.33: dùng JSONP trước để tránh CORS/preflight của Google Apps Script trên Vercel.
@@ -164,6 +177,22 @@ async function api(action, args = []) {
     }
   }
 }
+async function api(action, args = [], opts = {}) {
+  if (!navigator.onLine) throw markOfflineError('Máy đang offline thật.')
+  const key = stableApiKey(action, args)
+  const minGap = opts.force ? 0 : apiMinGap(action)
+  const lastOk = API_LAST_SUCCESS.get(key) || 0
+  if (minGap && Date.now() - lastOk < minGap && opts.cachedFallback) return opts.cachedFallback
+  if (API_INFLIGHT.has(key)) return API_INFLIGHT.get(key)
+  const job = apiRaw(action, args).then((data) => {
+    API_LAST_SUCCESS.set(key, Date.now())
+    return data
+  }).finally(() => {
+    API_INFLIGHT.delete(key)
+  })
+  API_INFLIGHT.set(key, job)
+  return job
+}
 function readJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key) || '') || fallback } catch { return fallback } }
 function writeJson(key, value) { localStorage.setItem(key, JSON.stringify(value)) }
 function clearJson(key) { localStorage.removeItem(key) }
@@ -182,20 +211,35 @@ function applyPreloadToCache(boPhan, data) {
 }
 async function refreshTodayData(boPhan) {
   if (!boPhan || !navigator.onLine) return getPreloadedToday(boPhan)
-  try {
-    const data = await api('getTodayBootstrapV318', [boPhan, today()])
-    setPreloadedToday(boPhan, data)
-    applyPreloadToCache(boPhan, data)
-    return data
-  } catch {
+  const key = `${boPhan}_${today()}`
+  const cached = getPreloadedToday(boPhan)
+  const last = TODAY_REFRESH_LAST.get(key) || 0
+  if (cached && Date.now() - last < 45000) return cached
+  if (TODAY_REFRESH_INFLIGHT.has(key)) return TODAY_REFRESH_INFLIGHT.get(key)
+
+  const job = (async () => {
     try {
-      const cache = await api('getClientCache', [boPhan])
-      const data = { ngay: today(), boPhan, cache, counts: {}, bundles: {}, loadedAt: new Date().toISOString() }
-      setPreloadedToday(boPhan, data)
-      applyPreloadToCache(boPhan, data)
-      return data
-    } catch { return getPreloadedToday(boPhan) }
-  }
+      try {
+        const data = await api('getTodayBootstrapV318', [boPhan, today()], { cachedFallback: cached })
+        setPreloadedToday(boPhan, data)
+        applyPreloadToCache(boPhan, data)
+        return data
+      } catch {
+        try {
+          const cache = await api('getClientCache', [boPhan], { cachedFallback: cached?.cache || null })
+          const data = { ngay: today(), boPhan, cache, counts: {}, bundles: {}, loadedAt: new Date().toISOString() }
+          setPreloadedToday(boPhan, data)
+          applyPreloadToCache(boPhan, data)
+          return data
+        } catch { return getPreloadedToday(boPhan) }
+      }
+    } finally {
+      TODAY_REFRESH_LAST.set(key, Date.now())
+      TODAY_REFRESH_INFLIGHT.delete(key)
+    }
+  })()
+  TODAY_REFRESH_INFLIGHT.set(key, job)
+  return job
 }
 async function preloadTodayData(boPhan, opts = {}) {
   if (!boPhan) return null
@@ -395,7 +439,7 @@ async function smartRefreshCompanyReport(boPhan = '', opts = {}) {
   const local = findCompanyReportCache(today())
   const isFresh = local?.cachedAt && Date.now() - Number(local.cachedAt || 0) < COMPANY_CACHE_TTL_MS
   if (local?.data && isFresh && !opts.force) return local.data
-  const data = await api('getBaoCaoTongCongTy', [today()])
+  const data = await api('getBaoCaoTongCongTy', [today()], { force: !!opts.force, cachedFallback: local?.data || null })
   const next = normalizeCompanyReport(data)
   if (next) {
     saveCompanyReportCache(next, today(), boPhan || readJson(LAST_DEPT_KEY, ''))
@@ -439,7 +483,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
   useEffect(() => {
     const boot = readJson(BOOT_KEY, null)
     if (boot?.boPhanList?.length) setDepartments(boot.boPhanList)
-    api('getLoginInitFast').then(r => {
+    api('getLoginInitFast', [], { cachedFallback: boot || null }).then(r => {
       writeJson(BOOT_KEY, r)
       setDepartments(r.boPhanList || fallbackDepartments)
     }).catch(() => {})
@@ -517,7 +561,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
       writeJson(SESSION_KEY, session)
       writeJson(LAST_DEPT_KEY, department)
       saveLoginCache(department, password, session, merged, preload)
-      api('getBaoCaoTongCongTy', [today()]).then(r => saveCompanyReportCache(r, today(), department)).catch(() => {})
+      smartRefreshCompanyReport(department).catch(() => {})
       setSession(session)
     } catch (e) { setMsg(e.message || 'Đăng nhập lỗi.') }
     setBusy(false)
@@ -1086,7 +1130,7 @@ function App() {
       }
       setTimeout(() => { if (alive) setBooting(false) }, cachedBoot || savedSession ? 120 : 300)
       if (!navigator.onLine) return
-      api('getLoginInitFast').then(init => {
+      api('getLoginInitFast', [], { cachedFallback: cachedBoot || null }).then(init => {
         if (!alive) return
         writeJson(BOOT_KEY, init)
         setDepartments(init.boPhanList || fallbackDepartments)
@@ -1105,7 +1149,7 @@ function App() {
     window.addEventListener('focus', run)
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('erp-queue-change', updateCount)
-    const t = setInterval(run, 5000)
+    const t = setInterval(run, 30000)
     run()
     return () => { window.removeEventListener('online', run); window.removeEventListener('focus', run); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('erp-queue-change', updateCount); clearInterval(t) }
   }, [])
@@ -1139,9 +1183,8 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
-      reg.update().catch(() => {})
-      setInterval(() => reg.update().catch(() => {}), 30 * 1000)
-
+      reg.update()
+      setInterval(() => reg.update(), 30000)
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing
         if (!newWorker) return
@@ -1151,7 +1194,6 @@ if ('serviceWorker' in navigator) {
           }
         })
       })
-
       let refreshing = false
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (refreshing) return

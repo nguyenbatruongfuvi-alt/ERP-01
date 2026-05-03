@@ -1,6 +1,6 @@
-const CACHE_VERSION = 'v38-cache-guard';
+const CACHE_VERSION = 'v40-api-call-full-clean-structure';
 const CACHE_NAME = `erp-v30-ui-shell-${CACHE_VERSION}`;
-const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
+const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png', '/logo-192.png', '/logo-512.png'];
 
 async function cacheAppShell() {
   const cache = await caches.open(CACHE_NAME);
@@ -9,9 +9,7 @@ async function cacheAppShell() {
       try {
         const fresh = await fetch(new Request(url, { cache: 'reload' }));
         if (fresh && fresh.ok) await cache.put(url, fresh.clone());
-      } catch (err) {
-        // Bỏ qua từng file để SW vẫn install được nếu 1 asset tạm lỗi.
-      }
+      } catch (err) {}
     })
   );
 }
@@ -63,7 +61,6 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Apps Script/API không cache; frontend local-first tự xử lý khi mất mạng.
   if (url.href.includes('script.google.com') || url.href.includes('script.googleusercontent.com')) {
     event.respondWith(fetch(event.request));
     return;
@@ -71,19 +68,16 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
-  // HTML/app shell luôn network-first để tránh kẹt phiên bản cũ gây trắng màn hình.
   if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('/index.html')) {
     event.respondWith(networkFirstThenCache(event.request));
     return;
   }
 
-  // JS/CSS cũng network-first; mất mạng mới dùng cache.
   if (url.pathname.startsWith('/assets/') || url.pathname.endsWith('.js') || url.pathname.endsWith('.css')) {
     event.respondWith(networkFirstThenCache(event.request));
     return;
   }
 
-  // Logo/manifest có thể cache-first để offline mở nhanh.
   if (url.pathname.endsWith('.png') || url.pathname.endsWith('.json')) {
     event.respondWith(cacheFirstThenNetwork(event.request));
     return;
