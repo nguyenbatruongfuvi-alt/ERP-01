@@ -14,7 +14,45 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
+const APP_VERSION = 'V30.38_CACHE_GUARD'
+const APP_VERSION_KEY = 'erp_v30_app_version'
 let SYNC_QUEUE_RUNNING = false
+
+// V30.38: Chống kẹt cache trắng màn hình sau deploy.
+// Chỉ xóa Cache Storage/app shell cũ, KHÔNG xóa localStorage nghiệp vụ/offline queue.
+(function guardAppVersion() {
+  try {
+    const savedVersion = localStorage.getItem(APP_VERSION_KEY)
+    if (savedVersion === APP_VERSION) return
+    localStorage.setItem(APP_VERSION_KEY, APP_VERSION)
+
+    // Không phá chế độ offline: nếu mất mạng, giữ bản đang có để người dùng vẫn mở được app.
+    if (!navigator.onLine) return
+
+    const reloadOnce = () => {
+      try {
+        sessionStorage.setItem('erp_v30_cache_guard_reloaded', APP_VERSION)
+        window.location.reload()
+      } catch {}
+    }
+    const alreadyReloaded = sessionStorage.getItem('erp_v30_cache_guard_reloaded') === APP_VERSION
+
+    const clearShellCaches = async () => {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(regs.map(reg => reg.update().catch(() => null)))
+      }
+      if ('caches' in window) {
+        const names = await caches.keys()
+        await Promise.all(names.filter(name => name.startsWith('erp-v30')).map(name => caches.delete(name)))
+      }
+    }
+
+    clearShellCaches().finally(() => {
+      if (!alreadyReloaded) reloadOnce()
+    })
+  } catch {}
+})()
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -1100,9 +1138,10 @@ createRoot(document.getElementById('root')).render(<App />)
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const reg = await navigator.serviceWorker.register('/sw.js')
-      reg.update()
-      setInterval(() => reg.update(), 60 * 60 * 1000)
+      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      reg.update().catch(() => {})
+      setInterval(() => reg.update().catch(() => {}), 30 * 1000)
+
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing
         if (!newWorker) return
@@ -1112,6 +1151,7 @@ if ('serviceWorker' in navigator) {
           }
         })
       })
+
       let refreshing = false
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (refreshing) return
