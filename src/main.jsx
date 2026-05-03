@@ -47,8 +47,8 @@ function personSearchText(p) {
 
 const menuGroups = [
   { title: 'BÁO CÁO', items: [{ id: 'bao-cao', icon: '📋', label: 'Báo cáo bộ phận' }, { id: 'tong-cty', icon: '📊', label: 'Báo cáo công ty' }] },
-  { title: 'NHẬP LIỆU', items: [{ id: 'tang-ca', icon: '🕒', label: 'Tăng ca' }, { id: 'bien-dong', icon: '👥', label: 'Biến động' }, { id: 'vang', icon: '🧾', label: 'Vắng mặt' }, { id: 'giao-viec', icon: '📝', label: 'Giao việc' }] },
-  { title: 'TIỆN ÍCH', items: [{ id: 'in-tang-ca', icon: '🖨️', label: 'In tăng ca' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
+  { title: 'NHẬP LIỆU', items: [{ id: 'tang-ca', icon: '🕒', label: 'Tăng ca' }, { id: 'bien-dong', icon: '👥', label: 'Biến động' }, { id: 'vang', icon: '🧾', label: 'Vắng mặt' },{ id: 'ngay-le', icon: '🗓️', label: 'Đăng ký làm ngày lễ' }, { id: 'giao-viec', icon: '📝', label: 'Giao việc' }] },
+  { title: 'TIỆN ÍCH', items: [{ id: 'in-tang-ca', icon: '🖨️', label: 'In báo cáo' }, { id: 'nhan-su', icon: '👤', label: 'Danh sách nhân sự' }, { id: 'tai-khoan', icon: '🔐', label: 'Tài khoản' }] },
 ]
 
 function markOfflineError(err) {
