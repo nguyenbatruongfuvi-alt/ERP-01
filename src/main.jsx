@@ -13,6 +13,8 @@ const PRELOAD_PREFIX = 'erp_v30_today_preload_v27'
 const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
+const UNIFIED_CACHE_KEY = 'erp_v30_unified_cache_v32'
+const COMPANY_CACHE_TTL_MS = 5 * 60 * 1000
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -124,10 +126,82 @@ async function api(action, args = []) {
 function readJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key) || '') || fallback } catch { return fallback } }
 function writeJson(key, value) { localStorage.setItem(key, JSON.stringify(value)) }
 function clearJson(key) { localStorage.removeItem(key) }
+
+function emptyUnifiedCache() { return { version: 32, lastSync: 0, departments: {}, company: {} } }
+function normalizeDeptKey(boPhan) { return stripVietnamese(boPhan || 'tat_ca') || 'tat_ca' }
+function getUnifiedCache() {
+  const raw = readJson(UNIFIED_CACHE_KEY, null)
+  if (!raw || typeof raw !== 'object') return emptyUnifiedCache()
+  return { ...emptyUnifiedCache(), ...raw, departments: raw.departments || {}, company: raw.company || {} }
+}
+function saveUnifiedCache(next) {
+  writeJson(UNIFIED_CACHE_KEY, { ...emptyUnifiedCache(), ...next, lastSync: Date.now() })
+}
+function getDeptUnified(boPhan) {
+  const all = getUnifiedCache()
+  return all.departments[normalizeDeptKey(boPhan)] || null
+}
+function setDeptUnified(boPhan, patch) {
+  if (!boPhan) return null
+  const all = getUnifiedCache()
+  const key = normalizeDeptKey(boPhan)
+  const old = all.departments[key] || { boPhan }
+  all.departments[key] = { ...old, ...patch, boPhan }
+  saveUnifiedCache(all)
+  return all.departments[key]
+}
+function mergeDeptTodayUnified(boPhan, patch) {
+  const dept = getDeptUnified(boPhan) || { boPhan }
+  return setDeptUnified(boPhan, { today: { ...(dept.today || {}), ...patch, ngay: patch?.ngay || dept.today?.ngay || today() } })
+}
+function getUnifiedCompanyReport(ngay = today()) {
+  const all = getUnifiedCache()
+  return all.company?.[ngay] || null
+}
+function setUnifiedCompanyReport(ngay, data) {
+  const all = getUnifiedCache()
+  all.company = all.company || {}
+  all.company[ngay] = { data, cachedAt: Date.now() }
+  saveUnifiedCache(all)
+  return all.company[ngay]
+}
+function migrateLegacyCompanyCache(ngay = today()) {
+  const existing = getUnifiedCompanyReport(ngay)
+  if (existing?.data) return existing
+  const legacy = readJson(localKey('bao_cao_cong_ty', [ngay]), null)
+  if (legacy?.data) return setUnifiedCompanyReport(ngay, legacy.data)
+  return null
+}
+async function preloadCompanyReport(opts = {}) {
+  const ngay = opts.ngay || today()
+  const local = migrateLegacyCompanyCache(ngay)
+  if (!navigator.onLine) return local?.data || null
+  const isFresh = local?.cachedAt && (Date.now() - local.cachedAt < COMPANY_CACHE_TTL_MS)
+  if (isFresh && !opts.force) return local.data
+  try {
+    const data = await api('getBaoCaoTongCongTy', [ngay])
+    const finalData = data || { rows: [], tongCN: 0, coMat: 0, vangSang: 0, vangChieu: 0, vangCaNgay: 0 }
+    setUnifiedCompanyReport(ngay, finalData)
+    writeJson(localKey('bao_cao_cong_ty', [ngay]), { data: finalData, cachedAt: Date.now() })
+    return finalData
+  } catch (e) {
+    return local?.data || null
+  }
+}
 function preloadKeyFor(boPhan, ngay = today()) { return `${PRELOAD_PREFIX}_${ngay}_${boPhan}` }
 function loaiForType(type) { return type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type }
-function getPreloadedToday(boPhan) { return readJson(preloadKeyFor(boPhan), null) }
-function setPreloadedToday(boPhan, data) { if (boPhan && data) writeJson(preloadKeyFor(boPhan, data.ngay || today()), { ...data, cachedAt: Date.now() }) }
+function getPreloadedToday(boPhan) {
+  const legacy = readJson(preloadKeyFor(boPhan), null)
+  const unified = getDeptUnified(boPhan)?.today
+  if (unified && (!legacy || Number(unified.cachedAt || 0) >= Number(legacy.cachedAt || 0))) return unified
+  return legacy
+}
+function setPreloadedToday(boPhan, data) {
+  if (!boPhan || !data) return
+  const value = { ...data, cachedAt: Date.now() }
+  writeJson(preloadKeyFor(boPhan, data.ngay || today()), value)
+  mergeDeptTodayUnified(boPhan, value)
+}
 function isFreshPreload(data) { return !!(data && data.ngay === today() && Date.now() - Number(data.cachedAt || 0) < PRELOAD_TTL_MS) }
 function applyPreloadToCache(boPhan, data) {
   if (!data) return null
@@ -168,16 +242,18 @@ function localKey(kind, parts = []) { return `${LOCAL_SAVE_PREFIX}_${kind}_${par
 function loginCacheKey(boPhan) { return localKey('login_cache', [stripVietnamese(boPhan || '')]) }
 function saveLoginCache(boPhan, password, session, cacheData, preloadData) {
   if (!boPhan || !session) return
-  writeJson(loginCacheKey(boPhan), {
+  const value = {
     boPhan,
     password: String(password || ''),
     session,
     cache: cacheData || null,
     preload: preloadData || null,
     savedAt: new Date().toISOString()
-  })
+  }
+  writeJson(loginCacheKey(boPhan), value)
+  setDeptUnified(boPhan, { login: value, cache: cacheData || null, today: preloadData || getDeptUnified(boPhan)?.today || null })
 }
-function readLoginCache(boPhan) { return readJson(loginCacheKey(boPhan), null) }
+function readLoginCache(boPhan) { return getDeptUnified(boPhan)?.login || readJson(loginCacheKey(boPhan), null) }
 function queueSave(action, args, meta = {}) {
   const q = readJson(OFFLINE_QUEUE_KEY, [])
   const requestId = meta.requestId || args?.[0]?.requestId || Date.now() + '-' + Math.random().toString(16).slice(2)
@@ -359,6 +435,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
       writeJson(SESSION_KEY, session)
       writeJson(LAST_DEPT_KEY, department)
       saveLoginCache(department, password, session, merged, preload)
+      preloadCompanyReport({ force: true }).catch(() => {})
       setSession(session)
     } catch (e) { setMsg(e.message || 'Đăng nhập lỗi.') }
     setBusy(false)
@@ -427,19 +504,31 @@ function ReportScreen({ session }) {
     <div style={{ height: 12 }} /><button className={saveButtonClass("primary-button", msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : 'Nhập / Cập nhật báo cáo'}</button><Status text={msg} />
   </div>
 }
-function CompanyScreen() {
+function CompanyScreen({ session }) {
   const defaultCompanyData = { rows: [], tongCN: 0, coMat: 0, vangSang: 0, vangChieu: 0, vangCaNgay: 0 }
   const cacheKey = localKey('bao_cao_cong_ty', [today()])
-  const [data, setData] = useState(() => readJson(cacheKey, null)?.data || defaultCompanyData), [msg, setMsg] = useState(() => readJson(cacheKey, null)?.data ? 'Đang hiển thị dữ liệu đã lưu trên máy.' : '')
+  const initialCompany = migrateLegacyCompanyCache(today())?.data || defaultCompanyData
+  const [data, setData] = useState(initialCompany)
+  const [msg, setMsg] = useState(initialCompany !== defaultCompanyData ? '⚡ Đang hiển thị dữ liệu trên máy.' : '')
   useEffect(() => {
-    const local = readJson(cacheKey, null)
-    if (local?.data) { setData(local.data); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') }
-    if (!navigator.onLine) { if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.'); return }
-    api('getBaoCaoTongCongTy', [today()]).then(r => {
-      setData(r || defaultCompanyData)
-      writeJson(cacheKey, { data: r || defaultCompanyData, cachedAt: Date.now() })
+    let alive = true
+    const local = migrateLegacyCompanyCache(today())
+    if (local?.data) {
+      setData(local.data)
+      setMsg('⚡ Đang hiển thị dữ liệu trên máy.')
+    }
+    if (!navigator.onLine) {
+      if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.')
+      return () => { alive = false }
+    }
+    const isFresh = local?.cachedAt && (Date.now() - local.cachedAt < COMPANY_CACHE_TTL_MS)
+    if (isFresh) return () => { alive = false }
+    preloadCompanyReport({ force: true }).then(r => {
+      if (!alive || !r) return
+      setData(r)
       setMsg('✅ Đã cập nhật báo cáo công ty.')
-    }).catch(e => { if (!local?.data) setMsg(e.message) })
+    }).catch(e => { if (alive && !local?.data) setMsg(e.message || 'Không tải được báo cáo công ty.') })
+    return () => { alive = false }
   }, [])
   const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
   return <><div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
@@ -839,7 +928,7 @@ function PrintOvertimeScreen({ session, departments }) {
   }
   return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu 45 ngày gần nhất.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={r.maNv || i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
 }
-function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
+function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
   const savedSession = readJson(SESSION_KEY, null)
   const [booting, setBooting] = useState(true)
@@ -872,6 +961,7 @@ function App() {
         setDepartments(init.boPhanList || fallbackDepartments)
       }).catch(() => {})
       if (last) preloadTodayData(last).then(data => { if (alive) { const merged = applyPreloadToCache(last, data); if (merged) setCache(merged) } }).catch(() => {})
+      preloadCompanyReport().catch(() => {})
     }
     boot()
     return () => { alive = false }
@@ -879,7 +969,7 @@ function App() {
 
   useEffect(() => {
     const updateCount = () => setSyncCount(readJson(OFFLINE_QUEUE_KEY, []).length)
-    const run = () => syncQueue().then(updateCount).catch(updateCount)
+    const run = () => syncQueue().then(() => { updateCount(); return preloadCompanyReport() }).catch(updateCount)
     const onVisible = () => { if (document.visibilityState === 'visible') run() }
     window.addEventListener('online', run)
     window.addEventListener('focus', run)

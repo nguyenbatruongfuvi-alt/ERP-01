@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v29-offline-true-full';
+const CACHE_NAME = 'erp-v30-ui-shell-v32-unified-preload';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {
