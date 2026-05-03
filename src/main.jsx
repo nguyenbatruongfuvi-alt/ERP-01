@@ -301,9 +301,28 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
   async function doLogin() {
     if (!department) { setMsg('Vui lòng chọn bộ phận.'); return }
     if (busy) return
-    setBusy(true); setMsg('⏳ Đang đăng nhập và nạp dữ liệu vào máy...')
+    setBusy(true); setMsg(navigator.onLine ? '⏳ Đang đăng nhập và nạp dữ liệu vào máy...' : '📴 Máy đang offline: đang mở dữ liệu đã lưu...')
     try {
       let preload = getPreloadedToday(department)
+      const cachedSession = readJson(SESSION_KEY, null)
+      const cachedCache = readJson(CACHE_KEY, null)
+
+      // OFFLINE-FIRST LOGIN: nếu máy không có mạng nhưng đã từng đăng nhập bộ phận này,
+      // cho vào app ngay bằng session/cache đã lưu trên máy. Không gọi Apps Script.
+      if (!navigator.onLine) {
+        if (cachedSession && String(cachedSession.boPhan || '') === String(department || '')) {
+          const merged = applyPreloadToCache(department, preload) || cachedCache
+          if (merged) setCache(merged)
+          writeJson(LAST_DEPT_KEY, department)
+          setMsg('✅ Đã mở app bằng dữ liệu lưu trên máy.')
+          setSession({ ...cachedSession, offlineMode: true, todayPreloaded: !!preload })
+        } else {
+          setMsg('❌ Máy đang offline. Bộ phận này chưa có dữ liệu đăng nhập lưu trên máy.')
+        }
+        setBusy(false)
+        return
+      }
+
       if (!preload?.cache) {
         setMsg('⏳ Lần đầu đăng nhập: đang tải dữ liệu bộ phận về điện thoại...')
         preload = await preloadTodayData(department, { background: false })
@@ -763,16 +782,36 @@ function PrintOvertimeScreen({ session, departments }) {
   function validateRange() { if (tuNgay && denNgay && tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return false } return true }
   async function load() { if (!validateRange()) return; setBusy(true); setMsg('⏳ Đang lấy dữ liệu xem trước...'); try { const r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), thang]); const data = r?.rows || []; setRows(data); writeJson(cacheKey, { rows: data, cachedAt: Date.now() }); setMsg(r?.message || `✅ Đã tải ${data.length} dòng xem trước.`) } catch (e) { setMsg(e.message || 'Không xem trước được.') } finally { setBusy(false) } }
   async function exportExcel() { if (!validateRange()) return; setBusy(true); setMsg('⏳ Đang tạo file Excel...'); try { const r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), thang }]); const url = r?.url || r?.fileUrl || r?.downloadUrl || ''; setFileUrl(url); setMsg(url ? '✅ Đã tạo file Excel. Có thể mở link hoặc gửi qua Zalo.' : '✅ Đã gửi yêu cầu xuất Excel.') ; if (url) window.open(url, '_blank') } catch (e) { setMsg(`❌ Chưa xuất được Excel: ${e.message || 'Lỗi Apps Script.'}`) } finally { setBusy(false) } }
-  function shareZalo() { if (!fileUrl) return; window.open(`https://zalo.me/share?url=${encodeURIComponent(fileUrl)}`, '_blank') }
+  async function shareZalo() {
+    if (!fileUrl) { setMsg('❌ Chưa có link Excel để gửi.'); return }
+    const shareText = `File tăng ca: ${fileUrl}`
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'File tăng ca', text: shareText, url: fileUrl })
+        setMsg('✅ Đã mở bảng chia sẻ. Chọn Zalo để gửi link.')
+        return
+      } catch (e) {
+        if (e && e.name === 'AbortError') return
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(fileUrl)
+      setMsg('✅ Đã copy link. Mở Zalo và dán gửi cho người nhận.')
+    } catch (e) {
+      window.prompt('Copy link này để gửi qua Zalo:', fileUrl)
+      setMsg('✅ Hãy copy link rồi dán vào Zalo.')
+    }
+  }
   return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu 45 ngày gần nhất.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={r.maNv || i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
 }
 function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
+  const savedSession = readJson(SESSION_KEY, null)
   const [booting, setBooting] = useState(true)
   const [bootText, setBootText] = useState('Đang tải dữ liệu gốc...')
-  const [screen, setScreen] = useState('login')
+  const [screen, setScreen] = useState(() => savedSession ? 'home' : 'login')
   const [departments, setDepartments] = useState(() => readJson(BOOT_KEY, null)?.boPhanList || fallbackDepartments)
-  const [session, setSession] = useState(null)
+  const [session, setSession] = useState(() => savedSession)
   const [cache, setCache] = useState(() => readJson(CACHE_KEY, null))
   const [syncCount, setSyncCount] = useState(() => readJson(OFFLINE_QUEUE_KEY, []).length)
 
@@ -787,8 +826,11 @@ function App() {
         const merged = applyPreloadToCache(last, cachedToday)
         if (merged) setCache(merged)
         setBootText('Đang mở dữ liệu đã lưu trên điện thoại...')
+      } else if (savedSession) {
+        setBootText('Đang mở phiên đăng nhập đã lưu...')
       }
-      setTimeout(() => { if (alive) setBooting(false) }, cachedBoot ? 120 : 300)
+      setTimeout(() => { if (alive) setBooting(false) }, cachedBoot || savedSession ? 120 : 300)
+      if (!navigator.onLine) return
       api('getLoginInitFast').then(init => {
         if (!alive) return
         writeJson(BOOT_KEY, init)
