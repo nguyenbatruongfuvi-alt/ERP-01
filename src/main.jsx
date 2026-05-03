@@ -248,6 +248,97 @@ function saveLocalGiaoViec(session, payload) {
   writeJson(key, [{ ...payload, localOnly: true, synced: false }, ...list.filter(x => x.requestId !== payload.requestId)])
   writeJson(localKey('giaoviec_sent', [session.boPhan]), [{ ...payload, localOnly: true, synced: false }, ...readJson(localKey('giaoviec_sent', [session.boPhan]), []).filter(x => x.requestId !== payload.requestId)].slice(0, 200))
 }
+
+
+// =========================
+// V30.34 COMPANY REPORT CACHE FIX
+// Đọc mọi cache cũ/mới theo cùng 1 chuẩn để Báo cáo công ty mở ra ngay, không chờ API.
+// =========================
+const UNIFIED_COMPANY_CACHE_KEY = 'erp_v30_unified_cache_v32'
+const COMPANY_CACHE_TTL_MS = 5 * 60 * 1000
+function normalizeCompanyReport(value) {
+  if (!value) return null
+  const data = value.data && value.data.rows ? value.data : value
+  if (!data || !Array.isArray(data.rows)) return null
+  return {
+    ...data,
+    tongCN: Number(data.tongCN || data.TONG_CN || 0),
+    coMat: Number(data.coMat || data.CO_MAT || 0),
+    vangSang: Number(data.vangSang || data.VANG_SANG || data.vangBuoiSang || 0),
+    vangChieu: Number(data.vangChieu || data.VANG_CHIEU || data.vangBuoiChieu || 0),
+    vangCaNgay: Number(data.vangCaNgay || data.VANG_CA_NGAY || 0),
+    rows: data.rows || []
+  }
+}
+function findCompanyReportDeep(value, depth = 0) {
+  if (!value || depth > 5) return null
+  const direct = normalizeCompanyReport(value)
+  if (direct) return direct
+  if (Array.isArray(value)) return null
+  if (typeof value !== 'object') return null
+  const preferredKeys = ['baoCaoCongTy', 'companyReport', 'bao_cao_cong_ty', 'reportCompany', 'data', 'today', 'cache', 'departments']
+  for (const key of preferredKeys) {
+    if (value[key]) {
+      const found = findCompanyReportDeep(value[key], depth + 1)
+      if (found) return found
+    }
+  }
+  for (const key of Object.keys(value)) {
+    if (preferredKeys.includes(key)) continue
+    const found = findCompanyReportDeep(value[key], depth + 1)
+    if (found) return found
+  }
+  return null
+}
+function findCompanyReportCache(ngay = today()) {
+  const candidates = [
+    UNIFIED_COMPANY_CACHE_KEY,
+    localKey('bao_cao_cong_ty', [ngay]),
+    `${LOCAL_SAVE_PREFIX}_bao_cao_cong_ty_${ngay}`,
+    `${LOCAL_SAVE_PREFIX}_bao_cao_cong_ty_${ngay.replaceAll('/', '-')}`,
+    CACHE_KEY,
+  ]
+  for (const key of candidates) {
+    const raw = readJson(key, null)
+    const found = findCompanyReportDeep(raw)
+    if (found) return { data: found, key, cachedAt: Number(raw?.cachedAt || raw?.lastSync || raw?.updatedAt || 0) || 0 }
+  }
+  // Fallback: quét toàn bộ localStorage để tương thích các bản cũ đã từng lưu bằng tên key khác.
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key || !key.includes('erp_v30')) continue
+    const raw = readJson(key, null)
+    const found = findCompanyReportDeep(raw)
+    if (found) return { data: found, key, cachedAt: Number(raw?.cachedAt || raw?.lastSync || raw?.updatedAt || 0) || 0 }
+  }
+  return null
+}
+function saveCompanyReportCache(data, ngay = today(), boPhan = '') {
+  const report = normalizeCompanyReport(data)
+  if (!report) return
+  const cachedAt = Date.now()
+  writeJson(localKey('bao_cao_cong_ty', [ngay]), { data: report, cachedAt })
+
+  const unified = readJson(UNIFIED_COMPANY_CACHE_KEY, { version: 34, departments: {}, lastSync: 0 }) || { version: 34, departments: {}, lastSync: 0 }
+  const deptKey = stripVietnamese(boPhan || readJson(LAST_DEPT_KEY, '') || 'cong_ty') || 'cong_ty'
+  unified.version = 34
+  unified.lastSync = cachedAt
+  unified.companyReport = report
+  unified.baoCaoCongTy = report
+  unified.departments = unified.departments || {}
+  unified.departments[deptKey] = {
+    ...(unified.departments[deptKey] || {}),
+    boPhan: boPhan || readJson(LAST_DEPT_KEY, '') || '',
+    today: {
+      ...((unified.departments[deptKey] || {}).today || {}),
+      ngay,
+      baoCaoCongTy: report,
+      companyReport: report,
+      cachedAt,
+    }
+  }
+  writeJson(UNIFIED_COMPANY_CACHE_KEY, unified)
+}
 function queueSummary() {
   const q = readJson(OFFLINE_QUEUE_KEY, [])
   const error = q.filter(x => x.status === 'error').length
@@ -362,6 +453,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
       writeJson(SESSION_KEY, session)
       writeJson(LAST_DEPT_KEY, department)
       saveLoginCache(department, password, session, merged, preload)
+      api('getBaoCaoTongCongTy', [today()]).then(r => saveCompanyReportCache(r, today(), department)).catch(() => {})
       setSession(session)
     } catch (e) { setMsg(e.message || 'Đăng nhập lỗi.') }
     setBusy(false)
@@ -430,23 +522,38 @@ function ReportScreen({ session }) {
     <div style={{ height: 12 }} /><button className={saveButtonClass("primary-button", msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : 'Nhập / Cập nhật báo cáo'}</button><Status text={msg} />
   </div>
 }
-function CompanyScreen() {
+function CompanyScreen({ session }) {
   const defaultCompanyData = { rows: [], tongCN: 0, coMat: 0, vangSang: 0, vangChieu: 0, vangCaNgay: 0 }
-  const cacheKey = localKey('bao_cao_cong_ty', [today()])
-  const [data, setData] = useState(() => readJson(cacheKey, null)?.data || defaultCompanyData), [msg, setMsg] = useState(() => readJson(cacheKey, null)?.data ? 'Đang hiển thị dữ liệu đã lưu trên máy.' : '')
+  const initialCache = findCompanyReportCache(today())
+  const [data, setData] = useState(() => initialCache?.data || defaultCompanyData)
+  const [msg, setMsg] = useState(() => initialCache?.data ? '⚡ Đang hiển thị dữ liệu đã lưu trên máy.' : '')
   useEffect(() => {
-    const local = readJson(cacheKey, null)
-    if (local?.data) { setData(local.data); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') }
-    if (!navigator.onLine) { if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.'); return }
+    const local = findCompanyReportCache(today())
+    if (local?.data) {
+      setData(local.data)
+      setMsg('⚡ Đang hiển thị dữ liệu đã lưu trên máy.')
+    }
+
+    if (!navigator.onLine) {
+      if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.')
+      return
+    }
+
+    // Nếu cache còn mới thì KHÔNG gọi API nữa. Màn hình mở ra tức thì, không chờ tải.
+    const isFresh = local?.cachedAt && Date.now() - Number(local.cachedAt || 0) < COMPANY_CACHE_TTL_MS
+    if (local?.data && isFresh) return
+
+    // Nếu cache đã có nhưng cũ, cập nhật API ở nền. UI vẫn đang hiển thị cache ngay.
     api('getBaoCaoTongCongTy', [today()]).then(r => {
-      setData(r || defaultCompanyData)
-      writeJson(cacheKey, { data: r || defaultCompanyData, cachedAt: Date.now() })
+      const next = r || defaultCompanyData
+      setData(next)
+      saveCompanyReportCache(next, today(), session?.boPhan || readJson(LAST_DEPT_KEY, ''))
       setMsg('✅ Đã cập nhật báo cáo công ty.')
     }).catch(e => { if (!local?.data) setMsg(e.message) })
-  }, [])
+  }, [session?.boPhan])
   const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
   return <><div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
-    <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={r.boPhan || i}><td>{i + 1}</td><td>{r.boPhan}</td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td></tr>)}</tbody></table></div><Status text={msg} ok={false} /></div></>
+    <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={r.boPhan || i}><td>{i + 1}</td><td>{r.boPhan}</td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td></tr>)}</tbody></table></div><Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} /></div></>
 }
 function useStaff(session, cache) {
   const preload = session?.boPhan ? getPreloadedToday(session.boPhan) : null
@@ -842,7 +949,7 @@ function PrintOvertimeScreen({ session, departments }) {
   }
   return <><div className="screen-title-row"><span className="screen-title-icon">🖨️</span><h1>In tăng ca</h1></div><div className="card print-overtime-card"><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select><div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><label className="field-label">Tháng</label><input className="form-control form-control-sm" value={thang} onChange={e => setThang(e.target.value)} /><div className="note-compact">ℹ️ Dữ liệu 45 ngày gần nhất.</div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được')} />{rows.length > 0 && <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><tbody>{rows.slice(0, 20).map((r, i) => <tr key={r.maNv || i}><td>{r.maNv}</td><td>{r.tenNv}</td><td>{r.boPhanGoc || r.boPhan}</td><td>{r.tong || r.soGio || ''}</td></tr>)}</tbody></table></div>}</div></>
 }
-function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
+function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
   const savedSession = readJson(SESSION_KEY, null)
   const [booting, setBooting] = useState(true)
