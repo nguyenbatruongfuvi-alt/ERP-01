@@ -1829,91 +1829,143 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
 .retention b { font-weight: 900; }
 
 
-/* =========================
-   ERP V30.51 UI RESTORE + INSTANT REPORT SYNC
-   Khôi phục giao diện báo cáo card mobile, cuộn riêng phần danh sách giống Tăng ca.
-   ========================= */
+/* =====================================================
+   ERP V30.52 - RESTORE V30.48 UI + DETAIL PRELOAD PATCH
+   - Giữ giao diện card mobile bản V30.48.
+   - Sửa tab Tổng hợp/Tăng ca không đè lên KPI.
+   - Chi tiết: vùng danh sách cuộn riêng như Tăng ca.
+   - Nhóm sáng/trưa/chiều/đột xuất nằm một hàng ngang, cuộn nhẹ nếu màn hẹp.
+   ===================================================== */
+
+.page {
+  padding: 12px 12px 24px !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
 
 .company-tabs {
+  position: relative !important;
+  top: auto !important;
+  z-index: 1 !important;
   display: flex !important;
   align-items: center !important;
-  gap: 0 !important;
+  gap: 18px !important;
   overflow-x: auto !important;
+  overflow-y: hidden !important;
+  flex-wrap: nowrap !important;
   -webkit-overflow-scrolling: touch !important;
+  white-space: nowrap !important;
+  margin: 0 0 10px !important;
+  padding: 12px 8px 0 !important;
   background: #fff !important;
-  border-bottom: 1px solid #e5e7eb !important;
-  margin: -8px -12px 10px !important;
-  padding: 0 8px !important;
-  position: sticky !important;
-  top: 58px !important;
-  z-index: 8 !important;
+  border-radius: 20px 20px 0 0 !important;
+  box-shadow: 0 6px 16px rgba(16,24,40,.04) !important;
 }
-
+.company-tabs::-webkit-scrollbar,
+.dept-detail-tabs::-webkit-scrollbar,
+.summary-kpi-grid::-webkit-scrollbar {
+  height: 0 !important;
+}
 .company-tabs button {
   flex: 0 0 auto !important;
-  min-width: 88px !important;
-  height: 48px !important;
+  min-height: 42px !important;
   border: 0 !important;
-  border-bottom: 3px solid transparent !important;
+  border-bottom: 4px solid transparent !important;
   background: transparent !important;
   color: #111827 !important;
-  padding: 0 8px !important;
-  font-size: 15px !important;
-  font-weight: 850 !important;
+  padding: 0 0 10px !important;
+  font-size: 18px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
   white-space: nowrap !important;
 }
-
 .company-tabs button.active {
   color: var(--color-primary) !important;
   border-bottom-color: var(--color-primary) !important;
 }
 
-.company-card-list {
-  padding: 12px 10px !important;
-  overflow: visible !important;
+.summary-kpi-card {
+  position: relative !important;
+  z-index: 0 !important;
+  margin-top: 0 !important;
+  padding: 10px !important;
+  overflow: hidden !important;
+  border-radius: 0 0 20px 20px !important;
+}
+.summary-kpi-grid {
+  display: grid !important;
+  grid-auto-flow: column !important;
+  grid-auto-columns: 132px !important;
+  grid-template-columns: none !important;
+  gap: 10px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  padding: 6px 4px 10px !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+.summary-kpi {
+  min-height: 96px !important;
+  border-radius: 16px !important;
+  background: #fff !important;
+  box-shadow: 0 4px 12px rgba(16,24,40,.05) !important;
+}
+.summary-kpi-label {
+  font-size: 15px !important;
+  line-height: 1.12 !important;
+  font-weight: 850 !important;
+}
+.summary-kpi-number {
+  margin-top: 8px !important;
+  font-size: 34px !important;
+  line-height: 1 !important;
+  font-weight: 950 !important;
 }
 
-.company-list-title,
-.company-list-footer {
+.company-card-list {
+  padding: 16px 14px 14px !important;
+  border-radius: 20px !important;
+  overflow: hidden !important;
+}
+.company-list-title {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
   gap: 8px !important;
+  margin-bottom: 12px !important;
 }
-
-.company-list-title span,
-.company-list-footer span {
-  color: var(--color-muted) !important;
+.company-list-title .summary-title {
+  font-size: 22px !important;
+  line-height: 1.1 !important;
+  font-weight: 950 !important;
+  margin: 0 !important;
+}
+.company-list-title span {
+  color: #667085 !important;
   font-size: 13px !important;
-  font-weight: 750 !important;
-  white-space: nowrap !important;
+  font-weight: 800 !important;
+  text-align: right !important;
 }
-
 .dept-card-list {
   display: grid !important;
-  gap: 10px !important;
-  margin-top: 10px !important;
+  gap: 12px !important;
 }
-
 .dept-card {
   width: 100% !important;
   border: 1px solid #e5e7eb !important;
-  border-radius: 16px !important;
+  border-radius: 18px !important;
   background: #fff !important;
-  box-shadow: 0 5px 14px rgba(16,24,40,.06) !important;
+  box-shadow: 0 6px 16px rgba(16,24,40,.06) !important;
   padding: 12px 10px !important;
   display: grid !important;
-  grid-template-columns: 50px minmax(0, 1fr) !important;
+  grid-template-columns: 54px minmax(0, 1fr) !important;
   gap: 10px !important;
   text-align: left !important;
   color: var(--color-text) !important;
 }
-
 .dept-card:active {
   background: #ecfdf3 !important;
   border-color: #8bd4a7 !important;
 }
-
 .dept-card-icon {
   width: 48px !important;
   height: 48px !important;
@@ -1922,278 +1974,288 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  font-size: 25px !important;
+  font-size: 26px !important;
 }
-
 .dept-card-body {
   min-width: 0 !important;
 }
-
 .dept-card-top {
   display: flex !important;
   justify-content: space-between !important;
   align-items: flex-start !important;
   gap: 8px !important;
 }
-
 .dept-card-top strong {
   display: block !important;
-  font-size: 18px !important;
+  font-size: 22px !important;
   font-weight: 950 !important;
-  line-height: 1.12 !important;
-  color: #101828 !important;
+  line-height: 1.08 !important;
 }
-
 .dept-card-top span {
   display: block !important;
-  margin-top: 4px !important;
+  margin-top: 6px !important;
   color: var(--color-muted) !important;
-  font-size: 13px !important;
-  font-weight: 750 !important;
+  font-size: 15px !important;
+  font-weight: 850 !important;
+  line-height: 1.2 !important;
 }
-
 .dept-card-top em {
+  flex: 0 0 auto !important;
   font-style: normal !important;
   color: #475467 !important;
-  font-size: 30px !important;
+  font-size: 34px !important;
   line-height: 1 !important;
 }
-
 .dept-stats {
-  margin-top: 10px !important;
+  margin-top: 12px !important;
   display: grid !important;
   grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
-  gap: 6px !important;
+  gap: 4px !important;
 }
-
 .dept-stat {
   min-width: 0 !important;
   text-align: center !important;
 }
-
 .dept-stat span {
   display: block !important;
-  font-size: 15px !important;
-  line-height: 1.1 !important;
+  font-size: 22px !important;
+  line-height: 1 !important;
 }
-
 .dept-stat small {
   display: block !important;
-  margin-top: 2px !important;
+  margin-top: 3px !important;
   color: #344054 !important;
-  font-size: 11px !important;
-  font-weight: 780 !important;
-  line-height: 1.08 !important;
+  font-size: 12px !important;
+  font-weight: 850 !important;
+  line-height: 1.05 !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
 }
-
 .dept-stat b {
   display: block !important;
-  margin-top: 4px !important;
+  margin-top: 5px !important;
   color: #101828 !important;
-  font-size: 18px !important;
+  font-size: 20px !important;
   font-weight: 950 !important;
 }
-
 .dept-stat.blue b { color: var(--color-blue) !important; }
 .dept-stat.green b { color: var(--color-green) !important; }
 .dept-stat.orange b { color: var(--color-orange) !important; }
 .dept-stat.red b { color: var(--color-red) !important; }
 
+.company-list-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin-top: 10px !important;
+  color: #667085 !important;
+  font-size: 16px !important;
+  font-weight: 850 !important;
+}
+
+/* Detail modal card/table like V30.48 */
 .dept-detail-modal {
   background: #fff !important;
 }
-
 .dept-detail-stats {
   flex: 0 0 auto !important;
   display: grid !important;
   grid-template-columns: repeat(3, 1fr) !important;
   gap: 6px !important;
-  padding: 12px 14px 10px !important;
+  padding: 14px 16px 12px !important;
   background: #fff !important;
-  border-bottom: 1px solid #eaecf0 !important;
+  border-bottom: 1px solid #eef2f6 !important;
 }
-
-.dept-detail-stats .dept-stat {
-  border: 0 !important;
-  border-radius: 12px !important;
-  background: white !important;
-  padding: 6px 4px !important;
-}
-
 .dept-detail-stats .dept-stat span {
-  font-size: 18px !important;
+  font-size: 26px !important;
 }
-
 .dept-detail-stats .dept-stat small {
-  font-size: 12px !important;
-  color: #111827 !important;
+  font-size: 15px !important;
 }
-
 .dept-detail-stats .dept-stat b {
-  font-size: 22px !important;
-  margin-top: 5px !important;
+  font-size: 30px !important;
 }
-
 .dept-detail-tabs {
   flex: 0 0 auto !important;
-  display: grid !important;
-  grid-template-columns: repeat(3, 1fr) !important;
-  gap: 0 !important;
-  padding: 0 12px !important;
-  background: #fff !important;
-  border-bottom: 1px solid #eaecf0 !important;
-}
-
-.dept-detail-tabs button {
-  min-height: 52px !important;
-  border: 0 !important;
-  border-bottom: 3px solid transparent !important;
-  background: transparent !important;
-  color: #111827 !important;
-  font-size: 14px !important;
-  font-weight: 850 !important;
   display: flex !important;
   align-items: center !important;
-  justify-content: center !important;
-  gap: 6px !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  gap: 20px !important;
+  padding: 12px 16px 0 !important;
+  border-bottom: 1px solid #eef2f6 !important;
+  background: #fff !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+.dept-detail-tabs button {
+  flex: 0 0 auto !important;
+  min-width: auto !important;
+  height: 56px !important;
+  border: 0 !important;
+  border-bottom: 5px solid transparent !important;
+  background: transparent !important;
+  color: #111827 !important;
+  padding: 0 4px 12px !important;
+  font-size: 18px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
   white-space: nowrap !important;
 }
-
 .dept-detail-tabs button.active {
   color: var(--color-primary) !important;
   border-bottom-color: var(--color-primary) !important;
 }
-
 .dept-detail-tabs button span {
-  min-width: 26px !important;
-  height: 26px !important;
-  padding: 0 7px !important;
-  border-radius: 12px !important;
-  background: #eef2f6 !important;
-  color: #111827 !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
+  min-width: 30px !important;
+  height: 30px !important;
+  margin-left: 8px !important;
+  padding: 0 9px !important;
+  border-radius: 999px !important;
+  background: #f2f4f7 !important;
+  color: #101828 !important;
+  font-size: 17px !important;
   font-weight: 950 !important;
 }
-
 .dept-detail-tabs button.active span {
-  background: #dcfce7 !important;
+  background: #d1fadf !important;
   color: var(--color-primary) !important;
 }
-
 .dept-detail-list {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   overflow-y: auto !important;
-  overflow-x: hidden !important;
+  overflow-x: auto !important;
   -webkit-overflow-scrolling: touch !important;
-  touch-action: pan-y !important;
-  padding: 12px 12px 80px !important;
+  padding: 16px 14px 10px !important;
   background: #fff !important;
 }
-
 .dept-detail-table {
   width: 100% !important;
   border-collapse: collapse !important;
-  background: #fff !important;
-  font-size: 14px !important;
+  font-size: 16px !important;
+  min-width: 0 !important;
 }
-
 .dept-detail-table th,
 .dept-detail-table td {
   border-bottom: 1px solid #eaecf0 !important;
-  padding: 11px 8px !important;
+  padding: 12px 10px !important;
   text-align: left !important;
-  vertical-align: top !important;
-  color: #101828 !important;
+  vertical-align: middle !important;
+  white-space: nowrap !important;
 }
-
 .dept-detail-table th {
   background: #f7f7fb !important;
+  color: #101828 !important;
+  font-size: 16px !important;
   font-weight: 950 !important;
-  position: sticky !important;
-  top: 0 !important;
-  z-index: 1 !important;
 }
-
 .dept-detail-table td {
+  font-size: 16px !important;
   font-weight: 650 !important;
+  color: #101828 !important;
 }
-
 .dept-empty {
-  min-height: 220px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  text-align: center !important;
-  color: var(--color-muted) !important;
+  padding: 26px 12px !important;
+  color: #667085 !important;
   font-size: 16px !important;
   font-weight: 800 !important;
+  text-align: center !important;
 }
-
 .dept-detail-footer {
   flex: 0 0 auto !important;
+  padding: 10px 14px calc(12px + env(safe-area-inset-bottom)) !important;
   border-top: 1px solid #eaecf0 !important;
   background: #fff !important;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom)) !important;
   display: flex !important;
   justify-content: flex-end !important;
 }
-
-.dept-detail-footer .mini {
-  min-width: 142px !important;
-  height: 48px !important;
-  font-size: 16px !important;
-  border-radius: 12px !important;
+.dept-detail-footer .primary-button {
+  width: 180px !important;
+  height: 56px !important;
+  border-radius: 16px !important;
+  font-size: 20px !important;
+  font-weight: 950 !important;
 }
 
-.summary-kpi-card {
-  overflow: hidden !important;
-}
-
-.summary-kpi-grid {
-  display: grid !important;
-  grid-template-columns: repeat(3, minmax(126px, 1fr)) !important;
-  gap: 10px !important;
+/* Entry modal tabs: keep "đột xuất" on same horizontal row */
+.modal-v23 .dept-detail-tabs,
+.modal-v23 .pick-tabs,
+.overtime-type-tabs {
+  flex-wrap: nowrap !important;
   overflow-x: auto !important;
-  -webkit-overflow-scrolling: touch !important;
+  white-space: nowrap !important;
+}
+.modal-v23 .pick-section-row,
+.modal-v23 .external-search-box,
+.modal-v23 .pick-scroll-area {
+  max-width: 100% !important;
 }
 
+/* Detail table mobile fit */
 @media (max-width: 420px) {
+  .company-tabs {
+    gap: 16px !important;
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
   .company-tabs button {
-    min-width: 82px !important;
-    font-size: 14px !important;
-  }
-  .dept-card {
-    grid-template-columns: 46px minmax(0, 1fr) !important;
-    padding: 11px 8px !important;
-  }
-  .dept-card-icon {
-    width: 44px !important;
-    height: 44px !important;
-    font-size: 23px !important;
-  }
-  .dept-card-top strong {
     font-size: 17px !important;
   }
-  .dept-stats {
-    gap: 4px !important;
+  .summary-kpi-grid {
+    grid-auto-columns: 130px !important;
   }
-  .dept-stat b {
-    font-size: 16px !important;
+  .summary-kpi {
+    min-height: 92px !important;
+  }
+  .summary-kpi-number {
+    font-size: 32px !important;
+  }
+  .company-list-title .summary-title {
+    font-size: 21px !important;
+  }
+  .dept-card {
+    grid-template-columns: 52px minmax(0, 1fr) !important;
+  }
+  .dept-card-top strong {
+    font-size: 21px !important;
+  }
+  .dept-card-top span {
+    font-size: 14px !important;
+  }
+  .dept-stat span {
+    font-size: 20px !important;
   }
   .dept-stat small {
-    font-size: 10px !important;
+    font-size: 11px !important;
   }
-  .dept-detail-table {
-    font-size: 13px !important;
+  .dept-stat b {
+    font-size: 19px !important;
+  }
+  .dept-detail-tabs {
+    gap: 22px !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+  .dept-detail-tabs button {
+    font-size: 18px !important;
   }
   .dept-detail-table th,
   .dept-detail-table td {
-    padding: 10px 6px !important;
+    padding: 11px 8px !important;
+    font-size: 15px !important;
   }
+}
+
+/* Horizontal phase row in detail header: sáng / trưa / chiều / đột xuất stays one line */
+.dept-detail-tabs {
+  scroll-snap-type: x proximity !important;
+}
+.dept-detail-tabs button {
+  scroll-snap-align: start !important;
 }

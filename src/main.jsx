@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.51_UI_RESTORE_INSTANT_REPORT'
+const ERP_CLIENT_VERSION = 'V30.52_UI48_DETAIL_PRELOAD'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -281,7 +281,6 @@ function saveLocalNhapLieu(session, type, title, payload) {
   }
   setPreloadedToday(session.boPhan, old)
   applyPreloadToCache(session.boPhan, old)
-  updateCompanyReportFromLocalSave(session, type, title, localPayload)
 
   // Ghi đủ các khóa local để màn báo cáo chi tiết mở lại thấy ngay, không chờ Google Sheet.
   const deptKey = cacheTextKey(session.boPhan)
@@ -478,80 +477,9 @@ function saveCompanyReportCache(data, ngay = today(), boPhan = '') {
   }
   writeJson(UNIFIED_COMPANY_CACHE_KEY, unified)
 }
-
-function updateCompanyReportFromLocalSave(session, type, title, payload) {
-  try {
-    const boPhan = session?.boPhan || payload?.boPhan || ''
-    if (!boPhan) return
-    const cached = findCompanyReportCache(today())
-    const pre = getPreloadedToday(boPhan) || {}
-    const staffCount = Number(pre?.cache?.nhanSuBoPhan?.length || 0)
-    const current = normalizeCompanyReport(cached?.data) || { rows: [], tongCN: 0, coMat: 0, vangSang: 0, vangChieu: 0, vangCaNgay: 0 }
-    const rows = Array.isArray(current.rows) ? current.rows.slice() : []
-    let idx = rows.findIndex(r => sameText(r.boPhan || r.BO_PHAN || r.tenBoPhan, boPhan))
-    if (idx < 0) {
-      rows.push({ boPhan, toTruong: session?.tenToTruong || '', tongCongNhan: staffCount, coMat: staffCount, vangBuoiSang: 0, vangBuoiChieu: 0, vangCaNgay: 0 })
-      idx = rows.length - 1
-    }
-    const row = { ...rows[idx], boPhan: rows[idx].boPhan || boPhan, toTruong: rows[idx].toTruong || session?.tenToTruong || '' }
-    const tong = Number(row.tongCongNhan || row.tongCN || row.TONG_CN || staffCount || 0)
-    row.tongCongNhan = tong
-    const cVang = pre?.counts?.['Báo cáo vắng'] || pre?.counts?.['Vắng mặt'] || {}
-    const cTangCa = pre?.counts?.['Tăng ca'] || {}
-    const cBienDong = pre?.counts?.['Biến động nhân sự'] || pre?.counts?.['Biến động'] || {}
-    const cNgayLe = pre?.counts?.['Làm ngày lễ'] || {}
-
-    if (type === 'Vắng mặt' || payload?.loaiBaoCao === 'Báo cáo vắng') {
-      row.vangBuoiSang = Number(cVang['Vắng buổi sáng'] || 0)
-      row.vangBuoiChieu = Number(cVang['Vắng buổi chiều'] || 0)
-      row.vangCaNgay = Number(cVang['Vắng cả ngày'] || 0)
-      row.coMat = Math.max(tong - row.vangBuoiSang - row.vangBuoiChieu - row.vangCaNgay, 0)
-    }
-    if (type === 'Tăng ca' || payload?.loaiBaoCao === 'Tăng ca') {
-      row.tangCaSang = Number(cTangCa['Tăng ca sáng'] || 0)
-      row.tangCaTrua = Number(cTangCa['Tăng ca trưa'] || 0)
-      row.tangCaChieu = Number(cTangCa['Tăng ca chiều'] || 0)
-      row.tangCaDotXuat = Number(cTangCa['Tăng ca đột xuất'] || 0)
-      row.tongTangCa = row.tangCaSang + row.tangCaTrua + row.tangCaChieu + row.tangCaDotXuat
-    }
-    if (type === 'Biến động' || payload?.loaiBaoCao === 'Biến động nhân sự') {
-      row.tuyenMoi = Number(cBienDong['Công nhân mới'] || 0)
-      row.nghiViec = Number(cBienDong['Nghỉ việc'] || 0)
-      row.xinVeSom = Number(cBienDong['Xin về sớm'] || 0)
-      row.dieuDong = Number(cBienDong['Điều động sang tổ khác'] || 0)
-    }
-    if (type === 'Làm ngày lễ' || payload?.loaiBaoCao === 'Làm ngày lễ') {
-      row.lamNgayLe = Number(cNgayLe['Đăng ký làm ngày lễ'] || 0)
-      const b = pre?.bundles?.['Làm ngày lễ']?.['Đăng ký làm ngày lễ'] || payload || {}
-      const h = Number(b.soGio || 8) || 8
-      row.gioNgayLe = row.lamNgayLe * h
-    }
-    rows[idx] = row
-    const next = normalizeCompanyReport({
-      ...current,
-      rows,
-      tongCN: rows.reduce((s, r) => s + Number(r.tongCongNhan || r.tongCN || 0), 0),
-      coMat: rows.reduce((s, r) => s + Number(r.coMat || 0), 0),
-      vangSang: rows.reduce((s, r) => s + Number(r.vangBuoiSang || r.vangSang || 0), 0),
-      vangChieu: rows.reduce((s, r) => s + Number(r.vangBuoiChieu || r.vangChieu || 0), 0),
-      vangCaNgay: rows.reduce((s, r) => s + Number(r.vangCaNgay || 0), 0),
-      localOnly: true,
-      localDetailLockAt: Date.now(),
-      cachedAt: Date.now(),
-    })
-    saveCompanyReportCache(next, today(), boPhan)
-    window.dispatchEvent(new CustomEvent('erp-company-report-updated', { detail: next }))
-  } catch (e) {}
-}
-
 async function smartRefreshCompanyReport(boPhan = '', opts = {}) {
   if (!navigator.onLine) return findCompanyReportCache(today())?.data || null
   const local = findCompanyReportCache(today())
-  const localLockAt = Number(local?.data?.localDetailLockAt || 0)
-  if (local?.data && localLockAt && Date.now() - localLockAt < LOCAL_DETAIL_LOCK_MS) {
-    window.dispatchEvent(new CustomEvent('erp-company-report-updated', { detail: local.data }))
-    return local.data
-  }
   const isFresh = local?.cachedAt && Date.now() - Number(local.cachedAt || 0) < COMPANY_CACHE_TTL_MS
   if (local?.data && isFresh && !opts.force) return local.data
   const data = await api('getBaoCaoTongCongTy', [today()])
@@ -771,14 +699,9 @@ function CompanyDeptCard({ row, index, moduleId, onOpen }) {
     ['🌅', 'Vắng chiều', vangChieu, 'blue'],
     ['📅', 'Vắng cả ngày', vangCaNgay, 'red'],
   ]
-  if (moduleId === 'tangca') {
-    const total = deptNumber(row.tongTangCa) || deptNumber(row.tangCaSang) + deptNumber(row.tangCaTrua) + deptNumber(row.tangCaChieu) + deptNumber(row.tangCaDotXuat)
-    stats = [['👥', 'Tổng CN', tong, 'blue'], ['🕒', 'Có tăng ca', total, 'green'], ['🌅', 'Sáng', deptNumber(row.tangCaSang), 'orange'], ['🍱', 'Trưa', deptNumber(row.tangCaTrua), 'green'], ['🌇', 'Chiều', deptNumber(row.tangCaChieu) + deptNumber(row.tangCaDotXuat), 'blue']]
-  }
-  if (moduleId === 'biendong') {
-    stats = [['🟢', 'Tuyển mới', deptNumber(row.tuyenMoi), 'green'], ['🔴', 'Nghỉ việc', deptNumber(row.nghiViec), 'red'], ['↔️', 'Điều chuyển', deptNumber(row.dieuDong), 'blue'], ['⏱️', 'Về sớm', deptNumber(row.xinVeSom), 'orange']]
-  }
-  if (moduleId === 'ngayle') stats = [['👥', 'Tổng CN', tong, 'blue'], ['⭐', 'Làm lễ', deptNumber(row.lamNgayLe), 'green'], ['🕒', 'Tổng giờ', deptNumber(row.gioNgayLe), 'orange']]
+  if (moduleId === 'tangca') stats = [['👥', 'Tổng CN', tong, 'blue'], ['🕒', 'Chọn chi tiết', '›', 'green']]
+  if (moduleId === 'biendong') stats = [['👥', 'Tổng CN', tong, 'blue'], ['🔄', 'Chọn chi tiết', '›', 'green']]
+  if (moduleId === 'ngayle') stats = [['👥', 'Tổng CN', tong, 'blue'], ['⭐', 'Chọn chi tiết', '›', 'green']]
   if (moduleId === 'vang') stats = [['👥', 'Tổng CN', tong, 'blue'], ['❌', 'Tổng vắng', vang, 'red'], ['☀️', 'Sáng', vangSang, 'orange'], ['🌅', 'Chiều', vangChieu, 'blue'], ['📅', 'Cả ngày', vangCaNgay, 'red']]
   return <button className="dept-card" onClick={onOpen}>
     <div className="dept-card-icon">{index % 5 === 0 ? '🏭' : index % 5 === 1 ? '📦' : index % 5 === 2 ? '🧺' : index % 5 === 3 ? '👷' : '✅'}</div>
@@ -788,6 +711,93 @@ function CompanyDeptCard({ row, index, moduleId, onOpen }) {
     </div>
   </button>
 }
+
+function reportLoaiForModule(module) {
+  if (!module) return ''
+  if (module.id === 'tonghop' || module.id === 'vang') return 'Vắng mặt'
+  if (module.id === 'tangca') return 'Tăng ca'
+  if (module.id === 'ngayle') return 'Làm ngày lễ'
+  if (module.id === 'biendong') return 'Chuyển bộ phận'
+  return module.label || module.loai || ''
+}
+function rowValueAny(row, keys, fallback = '') {
+  for (const key of keys) {
+    if (row && row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key]
+  }
+  return fallback
+}
+function normalizeDetailReportRow(row, module, title, deptName) {
+  const maNv = rowValueAny(row, ['maNv','maNV','ma_nv','MA_NV','Mã NV','Mã nhân viên','ma','MANV'])
+  const tenNv = rowValueAny(row, ['tenNv','hoTen','ten','HO_TEN','Họ và tên','Tên nhân viên','ho_va_ten','TEN_NV'])
+  const boPhan = rowValueAny(row, ['boPhan','boPhanGoc','BO_PHAN','Bộ phận','Tổ','to','toSanXuat'], deptName)
+  const soGio = rowValueAny(row, ['soGio','gio','SO_GIO','Giờ tăng ca','Giờ làm lễ','gioTangCa','gioLamLe'], '')
+  const trangThai = rowValueAny(row, ['trangThai','lyDo','LY_DO','Lý do','noiDung','Nội dung','chiTiet','CHI_TIET'], title)
+  const batDau = rowValueAny(row, ['batDau','BAT_DAU','Bắt đầu'], '')
+  const ketThuc = rowValueAny(row, ['ketThuc','KET_THUC','Kết thúc'], '')
+  return { ...row, maNv, tenNv, boPhan, boPhanGoc: boPhan, trangThai, soGio, batDau, ketThuc, selected: true }
+}
+function detailTitleMatch(row, title, module) {
+  const raw = [
+    rowValueAny(row, ['chiTiet','CHI_TIET','Chi tiết'], ''),
+    rowValueAny(row, ['loaiTangCa','LOAI_TANG_CA','Loại tăng ca'], ''),
+    rowValueAny(row, ['ca','Ca'], ''),
+    rowValueAny(row, ['trangThai','TRANG_THAI','Trạng thái'], ''),
+    rowValueAny(row, ['loai','LOAI','Loại'], ''),
+  ].join(' ')
+  const a = stripVietnamese(raw)
+  const b = stripVietnamese(title)
+  if (!a) return true
+  if (a.includes(b) || b.includes(a)) return true
+  if (module?.id === 'tangca') {
+    if (b.includes('sang') && a.includes('sang')) return true
+    if (b.includes('trua') && a.includes('trua')) return true
+    if (b.includes('chieu') && a.includes('chieu')) return true
+    if (b.includes('dot xuat') && (a.includes('dot xuat') || a.includes('khac'))) return true
+  }
+  if (module?.id === 'tonghop' || module?.id === 'vang') {
+    if (b.includes('sang') && a.includes('sang')) return true
+    if (b.includes('chieu') && a.includes('chieu')) return true
+    if (b.includes('ca ngay') && (a.includes('ca ngay') || a.includes('ngay'))) return true
+  }
+  return false
+}
+function rowsFromReportResponse(res) {
+  if (Array.isArray(res)) return res
+  if (Array.isArray(res?.rows)) return res.rows
+  if (Array.isArray(res?.items)) return res.items
+  if (Array.isArray(res?.data)) return res.data
+  if (Array.isArray(res?.chiTiet)) return res.chiTiet
+  return []
+}
+async function fetchCompanyDetailReportBundle(module, deptName, title) {
+  const loaiBaoCao = reportLoaiForModule(module)
+  const params = {
+    loaiBaoCao,
+    boPhan: deptName,
+    tuNgay: today(),
+    denNgay: today(),
+    chiTiet: title,
+    loaiTangCa: module?.id === 'tangca' ? title : 'Tất cả',
+  }
+  const res = await api('getBaoCaoChiTietXemTruoc', [params])
+  const rows = rowsFromReportResponse(res)
+    .filter(r => detailTitleMatch(r, title, module))
+    .map(r => normalizeDetailReportRow(r, module, title, deptName))
+    .filter(r => r.maNv || r.tenNv)
+  if (!rows.length) return null
+  const first = rows[0] || {}
+  return {
+    hasSavedBefore: true,
+    items: rows,
+    soGio: first.soGio || '',
+    batDau: first.batDau || '',
+    ketThuc: first.ketThuc || '',
+    cachedAt: Date.now(),
+    fromReport: true,
+  }
+}
+
+
 function DeptDetailModal({ module, dept, onClose }) {
   const [active, setActive] = useState(module.titles[0])
   const [bundles, setBundles] = useState({})
@@ -836,15 +846,23 @@ function DeptDetailModal({ module, dept, onClose }) {
     // Đồng bộ nền nhưng KHÔNG được xóa/ghi đè dữ liệu vừa lưu trên máy.
     module.titles.forEach(title => {
       api('getNhapLieuBundleV309', [today(), dept.boPhan, module.loai, title])
-        .then(remote => {
+        .then(async remote => {
           if (!alive) return
           const currentLocal = readLocalDetailBundle(dept.boPhan, module.loai, title) || readJson(localKey('nhaplieu', [today(), dept.boPhan, module.loai, title]), null)
           const remoteItems = Array.isArray(remote?.items) ? remote.items : []
-          // V30.50: không cho API cũ ghi đè local vừa lưu, kể cả trường hợp remote nhiều hơn local
-          // (ví dụ đã bỏ chọn còn 4 nhưng Sheet/API vẫn trả 5 trong vài giây).
+          // V30.52: không cho API cũ ghi đè local vừa lưu; nếu bundle cũ trống thì lấy trực tiếp từ BAO_CAO_CHI_TIET.
           if (shouldKeepFreshLocalBundle(currentLocal, remote)) return
-          if (!remoteItems.length) return
-          setBundles(prev => ({ ...prev, [title]: remote }))
+          let nextRemote = remoteItems.length ? remote : null
+          if (!nextRemote && module.id !== 'tonghop') {
+            nextRemote = await fetchCompanyDetailReportBundle(module, dept.boPhan, title).catch(() => null)
+          }
+          if (!nextRemote && (module.id === 'tonghop' || module.id === 'vang')) {
+            nextRemote = await fetchCompanyDetailReportBundle(module, dept.boPhan, title).catch(() => null)
+          }
+          const nextItems = Array.isArray(nextRemote?.items) ? nextRemote.items : []
+          if (!nextItems.length) return
+          writeJson(detailBundleKey(today(), dept.boPhan, module.loai, title), nextRemote)
+          setBundles(prev => ({ ...prev, [title]: nextRemote }))
           setMsg('')
         })
         .catch(() => {})
