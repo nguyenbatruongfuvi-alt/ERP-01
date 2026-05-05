@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v46-local-instant-scroll';
+const CACHE_NAME = 'erp-v30-ui-shell-v47-final-local-cache';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {

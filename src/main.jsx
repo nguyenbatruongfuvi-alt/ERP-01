@@ -21,6 +21,7 @@ window.__ERP_DEPT_DETAIL_ACTIVE__ = false
 function erpUserBusy() { return !!(window.__ERP_PICKING_ACTIVE__ || window.__ERP_DEPT_DETAIL_ACTIVE__) }
 
 function pad2(n) { return String(n).padStart(2, '0') }
+function hhmm() { const d = new Date(); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}` }
 
 const fallbackDepartments = ['Trộn Đường', 'Đóng Gói', 'Xếp Xoài', 'Ngâm Đường 1', 'Ngâm Đường 2', 'Quản Lý']
 const today = () => { const d = new Date(); return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}` }
@@ -221,9 +222,11 @@ async function syncQueue() {
     writeJson(OFFLINE_QUEUE_KEY, remain)
     window.dispatchEvent(new Event('erp-queue-change'))
     if (synced > 0) {
+      // Không refresh ngay sau khi lưu, vì Google Sheet có độ trễ và có thể trả dữ liệu cũ,
+      // làm mất dữ liệu local vừa lưu trong 5-20 giây đầu.
       const lastDept = readJson(LAST_DEPT_KEY, '')
-      if (lastDept) refreshTodayData(lastDept).catch(() => {})
-      if (lastDept) smartRefreshCompanyReport(lastDept, { force: true }).catch(() => {})
+      if (lastDept) setTimeout(() => refreshTodayData(lastDept).catch(() => {}), 25000)
+      if (lastDept) setTimeout(() => smartRefreshCompanyReport(lastDept, { force: true }).catch(() => {}), 25000)
     }
     return synced
   } finally {
@@ -234,103 +237,70 @@ function getLocalCount(boPhan, loai, title) {
   const pre = getPreloadedToday(boPhan)
   return Number(pre?.counts?.[loai]?.[title] || 0)
 }
-
-function modulesForNhapLieuType(type) {
-  if (type === 'Vắng mặt') return companyModules.filter(m => m.id === 'vang' || m.id === 'tonghop')
-  if (type === 'Tăng ca') return companyModules.filter(m => m.id === 'tangca')
-  if (type === 'Biến động') return companyModules.filter(m => m.id === 'biendong')
-  if (type === 'Làm ngày lễ') return companyModules.filter(m => m.id === 'ngayle')
-  return []
-}
-function updateLocalDetailCacheFromNhapLieu(session, type, title, payload) {
-  try {
-    const modules = modulesForNhapLieuType(type)
-    if (!modules.length) return
-    modules.forEach(module => {
-      const dept = { boPhan: session.boPhan, toTruong: session.tenToTruong }
-      const key = detailCacheKey(module, dept)
-      const old = readJson(key, null)
-      const oldRows = Array.isArray(old?.rows) ? old.rows : []
-      const cleanOld = oldRows.filter(r => !sameText(detailValue(r, ['chiTiet', 'CHI_TIET', 'title'], ''), title))
-      const nextRows = (payload.items || []).map(x => ({
-        ...x,
-        selected: true,
-        ngay: payload.ngay || today(),
-        NGAY: payload.ngay || today(),
-        boPhanBaoCao: session.boPhan,
-        BO_PHAN_BAO_CAO: session.boPhan,
-        toTruong: session.tenToTruong,
-        TO_TRUONG: session.tenToTruong,
-        chiTiet: title,
-        CHI_TIET: title,
-        loaiBaoCao: module.loai,
-        LOAI_BAO_CAO: module.loai,
-        batDau: payload.batDau || x.batDau || '',
-        BAT_DAU: payload.batDau || x.batDau || '',
-        ketThuc: payload.ketThuc || x.ketThuc || '',
-        KET_THUC: payload.ketThuc || x.ketThuc || '',
-        soGio: payload.soGio || x.soGio || '',
-        SO_GIO: payload.soGio || x.soGio || '',
-        trangThai: x.trangThai || payload.trangThai || 'Đã chọn',
-        TRANG_THAI: x.trangThai || payload.trangThai || 'Đã chọn',
-      }))
-      const localDetailPack = { rows: [...cleanOld, ...nextRows], cachedAt: Date.now(), localFirstAt: Date.now(), ngay: payload.ngay || today(), boPhan: session.boPhan, loaiBaoCao: module.loai }
-      writeJson(key, localDetailPack)
-      writeJson(immediateDetailKey(module, dept, title), { rows: nextRows, cachedAt: Date.now(), localFirstAt: Date.now(), ngay: payload.ngay || today(), boPhan: session.boPhan, loaiBaoCao: module.loai, title })
-      window.dispatchEvent(new CustomEvent('erp-local-detail-updated', { detail: { moduleId: module.id, boPhan: session.boPhan, title, rows: nextRows, localFirstAt: Date.now() } }))
-    })
-  } catch (e) {
-    console.warn('updateLocalDetailCacheFromNhapLieu failed', e)
-  }
-}
-function patchCompanyReportAfterNhapLieu(session, type, title, payload) {
-  try {
-    const local = findCompanyReportCache(today())
-    const report = local?.data
-    if (!report || !Array.isArray(report.rows)) return
-    const count = (payload.items || []).length
-    const next = { ...report, rows: report.rows.map(r => ({ ...r })) }
-    const deptName = session.boPhan
-    let row = next.rows.find(r => sameText(r.boPhan, deptName))
-    if (!row) {
-      row = { boPhan: deptName, toTruong: session.tenToTruong, tongCongNhan: (payload.items || []).length, coMat: 0, vangBuoiSang: 0, vangBuoiChieu: 0, vangCaNgay: 0 }
-      next.rows.push(row)
-    }
-    if (type === 'Vắng mặt') {
-      if (sameText(title, 'Vắng buổi sáng')) row.vangBuoiSang = count
-      if (sameText(title, 'Vắng buổi chiều')) row.vangBuoiChieu = count
-      if (sameText(title, 'Vắng cả ngày')) row.vangCaNgay = count
-      const tong = Number(row.tongCongNhan || 0)
-      row.coMat = Math.max(0, tong - Number(row.vangBuoiSang || 0) - Number(row.vangBuoiChieu || 0) - Number(row.vangCaNgay || 0))
-      next.vangSang = next.rows.reduce((s, x) => s + Number(x.vangBuoiSang || 0), 0)
-      next.vangChieu = next.rows.reduce((s, x) => s + Number(x.vangBuoiChieu || 0), 0)
-      next.vangCaNgay = next.rows.reduce((s, x) => s + Number(x.vangCaNgay || 0), 0)
-      next.coMat = next.rows.reduce((s, x) => s + Number(x.coMat || 0), 0)
-      next.tongCN = next.rows.reduce((s, x) => s + Number(x.tongCongNhan || 0), 0)
-    }
-    saveCompanyReportCache(next, today(), session.boPhan)
-    window.dispatchEvent(new CustomEvent('erp-company-report-updated', { detail: next }))
-  } catch (e) {
-    console.warn('patchCompanyReportAfterNhapLieu failed', e)
-  }
-}
 function saveLocalNhapLieu(session, type, title, payload) {
   const loai = payload.loaiBaoCao || loaiForType(type)
+  const savedItems = (payload.items || []).map(x => ({
+    ...x,
+    selected: true,
+    chiTiet: title,
+    loaiBaoCao: loai,
+    boPhan: session.boPhan,
+    boPhanBaoCao: session.boPhan,
+    toTruong: session.tenToTruong,
+    batDau: payload.batDau || x.batDau || '',
+    ketThuc: payload.ketThuc || x.ketThuc || '',
+    soGio: payload.soGio || x.soGio || '',
+    tuNgay: payload.tuNgay || '',
+    denNgay: payload.denNgay || '',
+  }))
+  const localPayload = { ...payload, loaiBaoCao: loai, items: savedItems, localOnly: true, savedAt: new Date().toISOString() }
+
   const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {}, cache: readJson(CACHE_KEY, null) || {} }
   old.counts = old.counts || {}; old.counts[loai] = old.counts[loai] || {}
-  old.counts[loai][title] = (payload.items || []).length
+  old.counts[loai][title] = savedItems.length
   old.bundles = old.bundles || {}; old.bundles[loai] = old.bundles[loai] || {}
   old.bundles[loai][title] = {
     hasSavedBefore: true,
-    items: (payload.items || []).map(x => ({ ...x, selected: true, batDau: payload.batDau || '', ketThuc: payload.ketThuc || '', soGio: payload.soGio || '' })),
+    items: savedItems,
     batDau: payload.batDau || '', ketThuc: payload.ketThuc || '', soGio: payload.soGio || '',
     localOnly: true, savedAt: new Date().toISOString()
   }
   setPreloadedToday(session.boPhan, old)
   applyPreloadToCache(session.boPhan, old)
-  writeJson(localKey('nhaplieu', [today(), session.boPhan, type, title]), payload)
-  updateLocalDetailCacheFromNhapLieu(session, type, title, payload)
-  patchCompanyReportAfterNhapLieu(session, type, title, payload)
+
+  // Ghi đủ các khóa local để màn báo cáo chi tiết mở lại thấy ngay, không chờ Google Sheet.
+  writeJson(localKey('nhaplieu', [today(), session.boPhan, type, title]), localPayload)
+  writeJson(localKey('nhaplieu', [today(), session.boPhan, loai, title]), localPayload)
+  upsertLocalDetailBundle(session, type, title, localPayload)
+  window.dispatchEvent(new CustomEvent('erp-local-detail-updated', { detail: { boPhan: session.boPhan, type, title, loaiBaoCao: loai } }))
+}
+
+function moduleIdForEntryType(type) {
+  if (type === 'Tăng ca') return 'tangca'
+  if (type === 'Biến động') return 'biendong'
+  if (type === 'Vắng mặt') return 'vang'
+  if (type === 'Làm ngày lễ') return 'ngayle'
+  return 'tonghop'
+}
+
+function upsertLocalDetailBundle(session, type, title, payload) {
+  try {
+    const loai = payload.loaiBaoCao || loaiForType(type)
+    const key = localKey('detail_bundle_v47', [today(), session.boPhan, loai, title])
+    writeJson(key, {
+      ...payload,
+      hasSavedBefore: true,
+      items: payload.items || [],
+      cachedAt: Date.now(),
+      batDau: payload.batDau || '',
+      ketThuc: payload.ketThuc || '',
+      soGio: payload.soGio || '',
+    })
+  } catch {}
+}
+
+function readLocalDetailBundle(boPhan, loai, title) {
+  return readJson(localKey('detail_bundle_v47', [today(), boPhan, loai, title]), null)
 }
 
 function saveLocalBaoCaoTong(session, payload) {
@@ -643,94 +613,6 @@ const companyModules = [
   { id: 'ngayle', label: 'Làm ngày lễ', loai: 'Làm ngày lễ', titles: ['Đăng ký làm ngày lễ'] },
 ]
 function deptNumber(value) { return Number(value || 0) || 0 }
-function detailValue(row, keys, fallback = '') {
-  for (const k of keys) {
-    const v = row?.[k]
-    if (v !== undefined && v !== null && String(v) !== '') return v
-  }
-  return fallback
-}
-function sameText(a, b) { return stripVietnamese(a || '') === stripVietnamese(b || '') }
-function detailCacheKey(module, dept) { return localKey('bao_cao_chi_tiet_v46', [today(), stripVietnamese(dept?.boPhan || ''), stripVietnamese(module?.loai || '')]) }
-function immediateDetailKey(module, dept, title) { return localKey('bao_cao_chi_tiet_immediate_v46', [today(), stripVietnamese(dept?.boPhan || ''), stripVietnamese(module?.loai || ''), stripVietnamese(title || '')]) }
-function normalizeDetailSheetRow(row, dept, fallbackTitle = '') {
-  const boPhan = detailValue(row, ['boPhanBaoCao', 'BO_PHAN_BAO_CAO', 'boPhan', 'BO_PHAN', 'boPhanGoc', 'BO_PHAN_GOC'], dept?.boPhan || '')
-  return {
-    maNv: detailValue(row, ['maNv', 'ma', 'MA_NV'], ''),
-    tenNv: detailValue(row, ['tenNv', 'ten', 'TEN_NV'], ''),
-    boPhan,
-    boPhanGoc: detailValue(row, ['boPhanGoc', 'BO_PHAN_GOC'], boPhan),
-    trangThai: detailValue(row, ['trangThai', 'TRANG_THAI'], ''),
-    lyDo: detailValue(row, ['lyDo', 'LY_DO', 'ghiChu', 'GHI_CHU', 'trangThai', 'TRANG_THAI'], ''),
-    batDau: detailValue(row, ['batDau', 'BAT_DAU'], ''),
-    ketThuc: detailValue(row, ['ketThuc', 'KET_THUC'], ''),
-    soGio: detailValue(row, ['soGio', 'SO_GIO'], ''),
-    chiTiet: detailValue(row, ['chiTiet', 'CHI_TIET', 'title'], fallbackTitle),
-    loaiBaoCao: detailValue(row, ['loaiBaoCao', 'LOAI_BAO_CAO'], ''),
-    selected: true,
-  }
-}
-function getLocalDetailRows(module, dept) {
-  const rows = []
-  const cached = readJson(detailCacheKey(module, dept), null)
-  if (Array.isArray(cached?.rows)) rows.push(...cached.rows)
-  const pre = getPreloadedToday(dept?.boPhan)
-  module.titles.forEach(title => {
-    const instant = readJson(immediateDetailKey(module, dept, title), null)
-    if (Array.isArray(instant?.rows)) rows.push(...instant.rows)
-    const b = pre?.bundles?.[module.loai]?.[title]
-    if (Array.isArray(b?.items)) rows.push(...b.items.map(x => ({ ...x, chiTiet: x.chiTiet || title, loaiBaoCao: x.loaiBaoCao || module.loai })))
-    const k1 = readJson(localKey('nhaplieu', [today(), dept?.boPhan, module.loai, title]), null)
-    if (Array.isArray(k1?.items)) rows.push(...k1.items.map(x => ({ ...x, chiTiet: x.chiTiet || title, loaiBaoCao: x.loaiBaoCao || module.loai })))
-    const typeName = module.id === 'vang' || module.id === 'tonghop' ? 'Vắng mặt' : module.label
-    const k2 = readJson(localKey('nhaplieu', [today(), dept?.boPhan, typeName, title]), null)
-    if (Array.isArray(k2?.items)) rows.push(...k2.items.map(x => ({ ...x, chiTiet: x.chiTiet || title, loaiBaoCao: x.loaiBaoCao || module.loai })))
-  })
-  const map = new Map()
-  rows.map(r => normalizeDetailSheetRow(r, dept)).forEach(r => {
-    if (!r.maNv && !r.tenNv) return
-    if (r.loaiBaoCao && !sameText(r.loaiBaoCao, module.loai)) return
-    const titleOk = module.titles.some(t => sameText(r.chiTiet, t))
-    if (!titleOk && r.chiTiet) return
-    map.set(`${r.chiTiet}_${r.maNv}_${r.tenNv}_${r.batDau}_${r.ketThuc}`, r)
-  })
-  return Array.from(map.values())
-}
-function rowsToBundles(module, dept, rows) {
-  const next = {}
-  module.titles.forEach(t => { next[t] = { items: [] } })
-  rows.map(r => normalizeDetailSheetRow(r, dept)).forEach(r => {
-    const title = module.titles.find(t => sameText(r.chiTiet, t)) || module.titles[0]
-    if (r.maNv || r.tenNv) next[title].items.push({ ...r, chiTiet: title, selected: true })
-  })
-  return next
-}
-async function fetchDetailRowsFromSheet(module, dept) {
-  const params = { loaiBaoCao: module.loai, boPhan: dept.boPhan, tuNgay: today(), denNgay: today(), loaiTangCa: 'Tất cả' }
-  let res = await api('getBaoCaoChiTietXemTruoc', [params])
-  let rows = Array.isArray(res) ? res : (res?.rows || res?.items || [])
-  if (!rows.length) {
-    const collected = []
-    for (const title of module.titles) {
-      try {
-        const b = await api('getNhapLieuBundleV309', [today(), dept.boPhan, module.loai, title])
-        if (Array.isArray(b?.items)) collected.push(...b.items.map(x => ({ ...x, chiTiet: title, loaiBaoCao: module.loai })))
-      } catch {}
-    }
-    rows = collected
-  }
-  const clean = rows.map(r => normalizeDetailSheetRow(r, dept)).filter(r => {
-    if (!r.maNv && !r.tenNv) return false
-    if (r.loaiBaoCao && !sameText(r.loaiBaoCao, module.loai)) return false
-    if (r.boPhan && !sameText(r.boPhan, dept.boPhan) && !sameText(r.boPhanGoc, dept.boPhan)) return false
-    return module.titles.some(t => sameText(r.chiTiet, t))
-  })
-  // Chỉ ghi cache khi có dữ liệu thật; không để lần đồng bộ rỗng ghi đè dữ liệu đã lưu trên máy.
-  if (clean.length) {
-    writeJson(detailCacheKey(module, dept), { rows: clean, cachedAt: Date.now(), ngay: today(), boPhan: dept.boPhan, loaiBaoCao: module.loai })
-  }
-  return clean
-}
 function DeptStat({ icon, label, value, tone = '' }) {
   return <div className={`dept-stat ${tone}`}><span>{icon}</span><small>{label}</small><b>{value}</b></div>
 }
@@ -741,7 +623,13 @@ function CompanyDeptCard({ row, index, moduleId, onOpen }) {
   const vangChieu = deptNumber(row.vangBuoiChieu)
   const vangCaNgay = deptNumber(row.vangCaNgay)
   const vang = vangSang + vangChieu + vangCaNgay
-  let stats = [['👥', 'Tổng CN', tong, 'blue'], ['✅', 'Có mặt', coMat, 'green'], ['☀️', 'Vắng sáng', vangSang, 'orange'], ['🌅', 'Vắng chiều', vangChieu, 'blue'], ['📅', 'Vắng cả ngày', vangCaNgay, 'red']]
+  let stats = [
+    ['👥', 'Tổng CN', tong, 'blue'],
+    ['✅', 'Có mặt', coMat, 'green'],
+    ['☀️', 'Vắng sáng', vangSang, 'orange'],
+    ['🌅', 'Vắng chiều', vangChieu, 'blue'],
+    ['📅', 'Vắng cả ngày', vangCaNgay, 'red'],
+  ]
   if (moduleId === 'tangca') stats = [['👥', 'Tổng CN', tong, 'blue'], ['🕒', 'Chọn chi tiết', '›', 'green']]
   if (moduleId === 'biendong') stats = [['👥', 'Tổng CN', tong, 'blue'], ['🔄', 'Chọn chi tiết', '›', 'green']]
   if (moduleId === 'ngayle') stats = [['👥', 'Tổng CN', tong, 'blue'], ['⭐', 'Chọn chi tiết', '›', 'green']]
@@ -756,88 +644,99 @@ function CompanyDeptCard({ row, index, moduleId, onOpen }) {
 }
 function DeptDetailModal({ module, dept, onClose }) {
   const [active, setActive] = useState(module.titles[0])
-  const [bundles, setBundles] = useState(() => rowsToBundles(module, dept, getLocalDetailRows(module, dept)))
+  const [bundles, setBundles] = useState({})
   const [loading, setLoading] = useState(false)
-  const [msg, setMsg] = useState('Đang hiển thị dữ liệu đã lưu trên máy.')
+  const [msg, setMsg] = useState('Đang dùng dữ liệu lưu trên máy.')
+
+  function readLocalBundles() {
+    const next = {}
+    module.titles.forEach(title => {
+      next[title] =
+        readLocalDetailBundle(dept.boPhan, module.loai, title) ||
+        readJson(localKey('nhaplieu', [today(), dept.boPhan, module.loai, title]), null) ||
+        readJson(localKey('nhaplieu', [today(), dept.boPhan, module.label, title]), null) ||
+        readJson(localKey('nhaplieu', [today(), dept.boPhan, module.id === 'vang' || module.id === 'tonghop' ? 'Vắng mặt' : module.label, title]), null) ||
+        getPreloadedToday(dept.boPhan)?.bundles?.[module.loai]?.[title] ||
+        {}
+    })
+    return next
+  }
+
+  function applyBundles(next, sourceMsg = 'Đang dùng dữ liệu lưu trên máy.') {
+    setBundles(next)
+    const first = module.titles.find(t => {
+      const items = Array.isArray(next?.[t]?.items) ? next[t].items : []
+      return items.map(normalizeRow).filter(x => x.selected !== false && (x.maNv || x.tenNv)).length > 0
+    })
+    if (first) setActive(first)
+    setMsg(sourceMsg)
+  }
+
   useEffect(() => {
     window.__ERP_DEPT_DETAIL_ACTIVE__ = true
     let alive = true
-    const refreshLocalDetail = () => {
-      const freshRows = getLocalDetailRows(module, dept)
-      if (!freshRows.length) return false
-      const freshBundles = rowsToBundles(module, dept, freshRows)
-      setBundles(freshBundles)
-      const first = module.titles.find(t => (freshBundles[t]?.items || []).length > 0)
-      if (first) setActive(first)
-      setMsg('⚡ Dữ liệu lấy từ máy. Đang đồng bộ nền...')
-      setLoading(false)
-      return true
-    }
+    const local = readLocalBundles()
+    applyBundles(local, 'Đang dùng dữ liệu lưu trên máy.')
+    setLoading(false)
+
+    // Đồng bộ nền nhưng KHÔNG được xóa/ghi đè dữ liệu vừa lưu trên máy.
+    module.titles.forEach(title => {
+      api('getNhapLieuBundleV309', [today(), dept.boPhan, module.loai, title])
+        .then(remote => {
+          if (!alive) return
+          const currentLocal = readLocalDetailBundle(dept.boPhan, module.loai, title) || readJson(localKey('nhaplieu', [today(), dept.boPhan, module.loai, title]), null)
+          const remoteItems = Array.isArray(remote?.items) ? remote.items : []
+          const localItems = Array.isArray(currentLocal?.items) ? currentLocal.items : []
+          // Nếu local có dữ liệu mới mà Google Sheet chưa kịp trả về thì giữ local.
+          if (localItems.length && remoteItems.length < localItems.length) return
+          if (!remoteItems.length) return
+          setBundles(prev => ({ ...prev, [title]: remote }))
+          setMsg('Đã đồng bộ nền.')
+        })
+        .catch(() => {})
+    })
+
+    return () => { alive = false; window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
+  }, [module.id, dept.boPhan])
+
+  useEffect(() => {
     const onLocalDetail = (event) => {
-      const d = event?.detail || {}
-      if (d.boPhan && !sameText(d.boPhan, dept.boPhan)) return
-      if (d.moduleId && d.moduleId !== module.id && !(module.id === 'tonghop' && d.moduleId === 'vang')) return
-      refreshLocalDetail()
+      if (event?.detail?.boPhan && !sameText(event.detail.boPhan, dept.boPhan)) return
+      applyBundles(readLocalBundles(), 'Đang dùng dữ liệu lưu trên máy.')
     }
     window.addEventListener('erp-local-detail-updated', onLocalDetail)
-    let localRows = getLocalDetailRows(module, dept)
-    if (localRows.length) {
-      const localBundles = rowsToBundles(module, dept, localRows)
-      setBundles(localBundles)
-      const first = module.titles.find(t => (localBundles[t]?.items || []).length > 0)
-      if (first) setActive(first)
-      setMsg('⚡ Dữ liệu lấy từ máy. Đang đồng bộ nền...')
-      setLoading(false)
-    } else {
-      setLoading(true)
-      setMsg('Đang lấy dữ liệu chi tiết...')
-    }
-    fetchDetailRowsFromSheet(module, dept).then(rows => {
-      if (!alive) return
-      // Nếu Google Sheet trả rỗng/tạm lỗi nhưng máy đang có dữ liệu, giữ nguyên dữ liệu đang hiển thị.
-      // Tránh lỗi: dữ liệu hiện 1-2 giây rồi bị xóa mất.
-      if (!rows.length && localRows.length) {
-        setMsg('Đang dùng dữ liệu lưu trên máy.')
-        return
-      }
-      const newestLocalRows = getLocalDetailRows(module, dept)
-      if (newestLocalRows.length && (!rows.length || newestLocalRows.length >= rows.length)) {
-        const newest = rowsToBundles(module, dept, newestLocalRows)
-        setBundles(newest)
-        const firstLocal = module.titles.find(t => (newest[t]?.items || []).length > 0)
-        if (firstLocal) setActive(firstLocal)
-        setMsg('Đang dùng dữ liệu lưu trên máy. Đồng bộ nền sẽ cập nhật sau.')
-        return
-      }
-      const next = rowsToBundles(module, dept, rows)
-      setBundles(next)
-      const first = module.titles.find(t => (next[t]?.items || []).length > 0)
-      if (first) setActive(first)
-      setMsg(rows.length ? ('Cập nhật: ' + hhmm()) : 'Chưa có dữ liệu chi tiết lưu trên máy cho mục này.')
-    }).catch(e => {
-      if (!alive) return
-      setMsg(localRows.length ? 'Đang dùng dữ liệu lưu trên máy.' : (e?.message || 'Chưa lấy được dữ liệu chi tiết.'))
-    }).finally(() => alive && setLoading(false))
-    return () => { alive = false; window.removeEventListener('erp-local-detail-updated', onLocalDetail); window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
+    return () => window.removeEventListener('erp-local-detail-updated', onLocalDetail)
   }, [module.id, dept.boPhan])
+
   const titleRows = (title) => {
     const raw = bundles?.[title]
     const items = Array.isArray(raw?.items) ? raw.items : []
-    return items.map(x => normalizeDetailSheetRow(x, dept, title)).filter(x => x.selected !== false && (x.maNv || x.tenNv))
+    return items.map(normalizeRow).filter(x => x.selected !== false && (x.maNv || x.tenNv))
   }
   const rows = titleRows(active)
   const totalSelected = module.titles.reduce((s, t) => s + titleRows(t).length, 0)
-  const totalHours = (module.id === 'tangca' || module.id === 'ngayle') ? module.titles.reduce((s, t) => s + titleRows(t).reduce((a, p) => a + (Number(p.soGio || bundles?.[t]?.soGio || (module.id === 'ngayle' ? 8 : 0)) || 0), 0), 0).toFixed(1) : ''
+  const totalHours = (module.id === 'tangca' || module.id === 'ngayle') ? module.titles.reduce((s, t) => {
+    const b = bundles?.[t] || {}
+    const hours = Number(b.soGio || titleRows(t)[0]?.soGio || (module.id === 'ngayle' ? 8 : 0)) || 0
+    return s + hours * titleRows(t).length
+  }, 0).toFixed(1) : ''
   const showTabs = module.titles.length > 1
   const tong = deptNumber(dept.tongCongNhan)
   const coMat = deptNumber(dept.coMat)
   const vang = deptNumber(dept.vangBuoiSang) + deptNumber(dept.vangBuoiChieu) + deptNumber(dept.vangCaNgay)
   const simpleAbsence = module.id === 'tonghop' || module.id === 'vang'
+
   return <div className="modal-overlay"><div className="modal-panel modal-v23 dept-detail-modal">
     <div className="modal-head-lite modal-head-green"><button className="modal-back" onClick={onClose}>←</button><b>{module.label === 'Tổng hợp' ? 'Chi tiết vắng mặt' : module.label + ' chi tiết'} - {dept.boPhan}</b><button className="modal-close" onClick={onClose}>×</button></div>
-    <div className="dept-info-card"><div className="dept-info-icon">👥</div><div className="dept-info-main"><div>Bộ phận: <b>{dept.boPhan}</b></div><span>Tổ trưởng: <b>{dept.toTruong || '-'}</b></span><span>Tổng số công nhân: <b className="text-green">{tong}</b></span><p><b className="text-green">Có mặt: {coMat}</b><i></i><b className="text-red">Vắng: {simpleAbsence ? vang : totalSelected}</b></p></div></div>
-    {showTabs && <div className="dept-detail-tabs">{module.titles.map(t => <button key={t} className={active === t ? 'active' : ''} onClick={() => setActive(t)}>{t.replace('Tăng ca ', '')}<span>{titleRows(t).length}</span></button>)}</div>}
-    <div className="dept-detail-list no-search">{loading ? <div className="dept-empty">Đang lấy dữ liệu chi tiết...</div> : rows.length ? <table className="dept-detail-table"><thead><tr>{simpleAbsence ? <><th>STT</th><th>Họ và tên</th><th>Lý do vắng (nếu có)</th></> : <><th>#</th><th>Mã NV</th><th>Họ và tên</th><th>{module.id === 'tangca' || module.id === 'ngayle' ? 'Bộ phận/Giờ' : 'Nội dung'}</th></>}</tr></thead><tbody>{rows.map((p, i) => <tr key={`${active}_${p.maNv}_${i}`}>{simpleAbsence ? <><td>{i + 1}</td><td>{p.tenNv}</td><td>{p.lyDo || p.trangThai || 'Có phép'}</td></> : <><td>{i + 1}</td><td>{p.maNv}</td><td>{p.tenNv}</td><td>{module.id === 'tangca' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 0} giờ` : module.id === 'ngayle' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 8} giờ` : (p.trangThai || active)}</td></>}</tr>)}</tbody></table> : <div className="dept-empty">Chưa có dữ liệu chi tiết lưu trên máy cho mục này.</div>}</div>
+    <div className="dept-detail-stats">
+      <DeptStat icon="👥" label="Tổng CN" value={tong} tone="blue" />
+      {simpleAbsence ? <DeptStat icon="✅" label="Có mặt" value={coMat} tone="green" /> : <DeptStat icon="✅" label={module.id === 'tangca' ? 'Có tăng ca' : module.id === 'ngayle' ? 'Làm lễ' : 'Có dữ liệu'} value={totalSelected} tone="green" />}
+      <DeptStat icon={module.id === 'tangca' || module.id === 'ngayle' ? '🕒' : '📅'} label={module.id === 'tangca' || module.id === 'ngayle' ? 'Tổng giờ' : 'Vắng'} value={module.id === 'tangca' || module.id === 'ngayle' ? totalHours : vang} tone="red" />
+    </div>
+    {showTabs && <div className="dept-detail-tabs">{module.titles.map(t => <button key={t} className={active === t ? 'active' : ''} onClick={() => setActive(t)}>{t.replace('Vắng buổi ', '').replace('Tăng ca ', '').replace('Đăng ký ', '')}<span>{titleRows(t).length}</span></button>)}</div>}
+    <div className="dept-detail-list">
+      {loading ? <div className="dept-empty">Đang tải dữ liệu...</div> : rows.length ? <table className="dept-detail-table"><thead><tr>{simpleAbsence ? <><th>STT</th><th>Họ và tên</th><th>Lý do vắng</th></> : <><th>#</th><th>Mã NV</th><th>Họ và tên</th><th>{module.id === 'tangca' || module.id === 'ngayle' ? 'Bộ phận/Giờ' : 'Nội dung'}</th></>}</tr></thead><tbody>{rows.map((p, i) => <tr key={`${active}_${p.maNv}_${i}`}>{simpleAbsence ? <><td>{i + 1}</td><td>{p.tenNv}</td><td>{p.trangThai || 'Có phép'}</td></> : <><td>{i + 1}</td><td>{p.maNv}</td><td>{p.tenNv}</td><td>{module.id === 'tangca' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 0} giờ` : module.id === 'ngayle' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 8} giờ` : (p.trangThai || active)}</td></>}</tr>)}</tbody></table> : <div className="dept-empty">Chưa có dữ liệu chi tiết cho mục này.</div>}
+    </div>
     <div className="dept-detail-footer"><span>{msg}</span><button className="primary-button mini" onClick={onClose}>Đóng</button></div>
   </div></div>
 }
@@ -851,21 +750,31 @@ function CompanyScreen({ session }) {
   useEffect(() => {
     const loadLocal = () => {
       const local = findCompanyReportCache(today())
-      if (local?.data) { setData(local.data); setMsg('⚡ Đang hiển thị dữ liệu đã lưu trên máy.') }
+      if (local?.data) {
+        setData(local.data)
+        setMsg('⚡ Đang hiển thị dữ liệu đã lưu trên máy.')
+      }
       return local
     }
     const local = loadLocal()
     const onUpdated = (event) => {
-      if (window.__ERP_DEPT_DETAIL_ACTIVE__) return
-      if (event?.detail) { setData(event.detail); setMsg('✅ Đã cập nhật báo cáo công ty.') } else loadLocal()
+      if (erpUserBusy()) return
+      if (event?.detail) {
+        setData(event.detail)
+        setMsg('✅ Đã cập nhật báo cáo công ty.')
+      } else {
+        loadLocal()
+      }
     }
     window.addEventListener('erp-company-report-updated', onUpdated)
+
     if (!navigator.onLine) {
       if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.')
       return () => window.removeEventListener('erp-company-report-updated', onUpdated)
     }
+
     const refresh = (force = false) => {
-      if (window.__ERP_DEPT_DETAIL_ACTIVE__ || window.__ERP_PICKING_ACTIVE__) return
+      if (erpUserBusy()) return
       return smartRefreshCompanyReport(session?.boPhan || readJson(LAST_DEPT_KEY, ''), force ? { force: true } : undefined).catch(e => { if (!local?.data) setMsg(e.message) })
     }
     refresh()
@@ -874,16 +783,21 @@ function CompanyScreen({ session }) {
     window.addEventListener('focus', onFocus)
     window.addEventListener('online', onOnline)
     const t = setInterval(() => refresh(), SMART_REFRESH_MS)
-    return () => { window.removeEventListener('erp-company-report-updated', onUpdated); window.removeEventListener('focus', onFocus); window.removeEventListener('online', onOnline); clearInterval(t) }
+    return () => {
+      window.removeEventListener('erp-company-report-updated', onUpdated)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('online', onOnline)
+      clearInterval(t)
+    }
   }, [session?.boPhan])
-  const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)']]
+  const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
   const module = companyModules.find(x => x.id === activeModule) || companyModules[0]
-  return <><div className="company-tabs">{companyModules.map(m => <button key={m.id} className={activeModule === m.id ? 'active' : ''} onClick={() => { setActiveModule(m.id); setSelectedDept(null) }}>{m.label}</button>)}</div>
+  return <>
+    <div className="company-tabs">{companyModules.map(m => <button key={m.id} className={activeModule === m.id ? 'active' : ''} onClick={() => setActiveModule(m.id)}>{m.label}</button>)}</div>
     <div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
     <div className="summary-table-card company-card-list"><div className="company-list-title"><div className="summary-title">{module.label} bộ phận</div><span>{msg || 'Cập nhật: ' + hhmm()}</span></div>
       <div className="dept-card-list">{(data.rows || []).map((r, i) => <CompanyDeptCard key={r.boPhan || i} row={r} index={i} moduleId={activeModule} onOpen={() => setSelectedDept(r)} />)}</div>
       <div className="company-list-footer"><span>Tổng cộng: {(data.rows || []).length} bộ phận</span><span>Tổng nhân viên: {data.tongCN || 0}</span></div>
-      <Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} />
     </div>
     {selectedDept && <DeptDetailModal module={module} dept={selectedDept} onClose={() => setSelectedDept(null)} />}
   </>
@@ -969,18 +883,35 @@ function mergeBundleRows(bundle, staff, session, type, title) {
   if (!hasSavedBefore && localDraft && Array.isArray(localDraft.items)) {
     const draftMap = new Map(localDraft.items.map(x => [x.maNv, x]))
     base = base.map(p => ({ ...p, selected: draftMap.has(p.maNv), trangThai: draftMap.get(p.maNv)?.trangThai || p.trangThai }))
-    return { rows: base, batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
+    return { rows: base.slice().sort((a,b)=>(b.selected?1:0)-(a.selected?1:0)), batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
   }
 
   // Không tự động chọn sẵn nhân viên cho mục Tăng ca.
   const first = saved.find(x => x.batDau || x.ketThuc || x.soGio) || saved[0] || {}
-  // Giữ nguyên thứ tự danh sách gốc; chỉ đánh dấu selected, không đưa lên đầu.
+  // Luôn đưa người đã lưu/đã chọn lên đầu để mở lại nhìn thấy ngay.
+  const selectedOrder = new Set(saved.filter(x => x.selected !== false).map(x => x.maNv))
+  base = base.slice().sort((a, b) => {
+    const as = a.selected ? 1 : 0
+    const bs = b.selected ? 1 : 0
+    if (bs !== as) return bs - as
+    const ao = selectedOrder.has(a.maNv) ? 1 : 0
+    const bo = selectedOrder.has(b.maNv) ? 1 : 0
+    if (bo !== ao) return bo - ao
+    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
+  })
   return { rows: base, batDau: first.batDau || '', ketThuc: first.ketThuc || '', soGio: first.soGio || '', hasSavedBefore }
 }
 function sameDeptRow(p, dept) { return stripVietnamese(p?.boPhanGoc || p?.boPhan) === stripVietnamese(dept) }
 function sortPickRows(list, dept) {
-  // Giữ nguyên thứ tự đang nhìn thấy; không đưa người đã chọn lên đầu.
-  return (list || []).slice()
+  return (list || []).slice().sort((a, b) => {
+    const as = a.selected ? 1 : 0
+    const bs = b.selected ? 1 : 0
+    if (bs !== as) return bs - as
+    const ao = (a.outside || !sameDeptRow(a, dept)) ? 1 : 0
+    const bo = (b.outside || !sameDeptRow(b, dept)) ? 1 : 0
+    if (ao !== bo) return ao - bo
+    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
+  })
 }
 
 function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
@@ -1034,21 +965,17 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     if (localDraft && Array.isArray(localDraft.items)) {
       const map = new Map(localDraft.items.map(x => [x.maNv, x]))
       const draftRows = mergeBundleRows({ items: localDraft.items, batDau: localDraft.batDau, ketThuc: localDraft.ketThuc }, staff, session, type, title)
-      setRows(draftRows.rows.map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })))
+      setRows(sortPickRows(draftRows.rows.map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })), session.boPhan))
       if (type === 'Tăng ca') { setBatDau(localDraft.batDau || ''); setKetThuc(localDraft.ketThuc || '') }
       setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
       setLoading(false)
     } else if (preBundle) {
       const merged = mergeBundleRows(preBundle, staff, session, type, title)
-      setRows(merged.rows)
+      setRows(sortPickRows(merged.rows, session.boPhan))
       if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
       setLoading(false)
     } else {
-      // Không chờ API mới hiện danh sách. Dùng ngay danh sách nhân sự đã có trên máy,
-      // rồi đồng bộ nền giống màn Tăng ca đang chạy ổn định.
-      setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })))
-      setMsg('Đang dùng danh sách nhân sự lưu trên máy. Đang đồng bộ nền...')
-      setLoading(false)
+      setLoading(true)
     }
     api('getNhapLieuBundleV309', [today(), session.boPhan, loai, title])
       .then(bundle => {
@@ -1056,7 +983,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
         const activeDraft = readJson(draftKeyFor(session, type, title), null)
         if (activeDraft?.localDraftAt && activeDraft.localDraftAt >= (localDraft?.localDraftAt || 0)) return
         const merged = mergeBundleRows(bundle, staff, session, type, title)
-        setRows(merged.rows)
+        setRows(sortPickRows(merged.rows, session.boPhan))
         if (type === 'Tăng ca') {
           setBatDau(merged.batDau || '')
           setKetThuc(merged.ketThuc || '')
@@ -1070,13 +997,13 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
         const localDraft = readJson(draftKeyFor(session, type, title), null)
         if (localDraft && Array.isArray(localDraft.items)) {
           const map = new Map(localDraft.items.map(x => [x.maNv, x]))
-          setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })))
+          setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })), session.boPhan))
           setBatDau(localDraft.batDau || '')
           setKetThuc(localDraft.ketThuc || '')
           setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
           setMsg(e.offline ? 'Đang offline thật: dùng dữ liệu tạm trên máy.' : 'API lỗi: đang dùng dữ liệu tạm trên máy.')
         } else if (!preBundle) {
-          setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })))
+          setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })), session.boPhan))
           setMsg(e.message || 'Không tải được dữ liệu.')
         }
       })
@@ -1131,7 +1058,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   function defaultStatus() { return type === 'Vắng mặt' ? 'Có phép' : 'Đã chọn' }
   function toggle(ma) {
     setRows(list => {
-      const next = list.map(x => x.maNv === ma ? { ...x, selected: !x.selected, trangThai: x.trangThai || defaultStatus() } : x)
+      const next = sortPickRows(list.map(x => x.maNv === ma ? { ...x, selected: !x.selected, trangThai: x.trangThai || defaultStatus() } : x), session.boPhan)
       writePickDraft(next)
       return next
     })
@@ -1147,7 +1074,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     const person = { ...normalizeRow(p), boPhanGoc: p.boPhanGoc || p.boPhan || '', outside: true, selected: true, trangThai: p.trangThai || defaultStatus() }
     setRows(list => {
       const exists = list.some(x => x.maNv === person.maNv)
-      const next = exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [person, ...list]
+      const next = sortPickRows(exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [person, ...list], session.boPhan)
       writePickDraft(next)
       return next
     })
@@ -1468,10 +1395,10 @@ function App() {
   useEffect(() => {
     if (!session?.boPhan) return
     const run = () => {
-      if (window.__ERP_PICKING_ACTIVE__) return
+      if (erpUserBusy()) return
       if (!navigator.onLine) return
       preloadTodayData(session.boPhan).then(data => {
-        if (window.__ERP_PICKING_ACTIVE__) return
+        if (erpUserBusy()) return
         const merged = applyPreloadToCache(session.boPhan, data)
         if (merged) setCache(merged)
       }).catch(() => {})
