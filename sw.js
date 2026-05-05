@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v50-instant-local-lock';
+const CACHE_NAME = 'erp-v30-ui-shell-v51-ui-sync-restore';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {
