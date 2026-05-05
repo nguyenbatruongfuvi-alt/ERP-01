@@ -2220,3 +2220,71 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
   min-width: 104px !important;
   height: 44px !important;
 }
+
+
+/* =========================
+   ERP V30.48 FINAL LOCAL DETAIL INSTANT
+   - Chi tiết đọc key cache chuẩn hóa, mở ra có ngay sau khi lưu.
+   - Bỏ mọi dòng ghi chú/trạng thái trong chi tiết để nhường chỗ danh sách.
+   - Danh sách chi tiết cuộn riêng giống PickModal/Tăng ca.
+   ========================= */
+.dept-detail-modal {
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+.dept-detail-modal .modal-head-green,
+.dept-detail-modal .dept-detail-stats,
+.dept-detail-modal .dept-detail-tabs,
+.dept-detail-modal .dept-detail-footer {
+  flex: 0 0 auto !important;
+}
+.dept-detail-modal .dept-detail-stats {
+  padding: 8px 10px 6px !important;
+}
+.dept-detail-modal .dept-detail-tabs {
+  margin: 0 10px 6px !important;
+}
+.dept-detail-modal .dept-detail-list {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  touch-action: pan-y !important;
+  overscroll-behavior-y: contain !important;
+  padding: 0 10px 8px !important;
+}
+.dept-detail-modal .dept-detail-table {
+  width: 100% !important;
+  min-width: 100% !important;
+  border-collapse: collapse !important;
+}
+.dept-detail-modal .dept-detail-table th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2 !important;
+  background: #f3f4f6 !important;
+}
+.dept-detail-modal .dept-empty {
+  min-height: 120px !important;
+}
+.dept-detail-modal .dept-note,
+.dept-detail-modal .dept-detail-search,
+.dept-detail-modal .dept-detail-footer span {
+  display: none !important;
+}
+.dept-detail-modal .dept-detail-footer {
+  display: flex !important;
+  justify-content: flex-end !important;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom)) !important;
+  background: #fff !important;
+  border-top: 1px solid #eaecf0 !important;
+}
+.dept-detail-modal .dept-detail-footer .mini {
+  width: 130px !important;
+  min-width: 130px !important;
+  height: 44px !important;
+}

@@ -175,6 +175,18 @@ async function preloadTodayData(boPhan, opts = {}) {
   return refreshTodayData(boPhan)
 }
 function localKey(kind, parts = []) { return `${LOCAL_SAVE_PREFIX}_${kind}_${parts.filter(Boolean).join('_')}` }
+function cacheTextKey(value) { return stripVietnamese(value || '').replace(/\s+/g, '_') }
+function sameText(a, b) { return stripVietnamese(a || '') === stripVietnamese(b || '') }
+function detailBundleKey(ngay, boPhan, loai, title) {
+  return localKey('detail_bundle_v48', [ngay || today(), cacheTextKey(boPhan), cacheTextKey(loai), cacheTextKey(title)])
+}
+function readFirstJson(keys, fallback = null) {
+  for (const key of keys) {
+    const value = readJson(key, null)
+    if (value) return value
+  }
+  return fallback
+}
 function loginCacheKey(boPhan) { return localKey('login_cache', [stripVietnamese(boPhan || '')]) }
 function saveLoginCache(boPhan, password, session, cacheData, preloadData) {
   if (!boPhan || !session) return
@@ -269,8 +281,16 @@ function saveLocalNhapLieu(session, type, title, payload) {
   applyPreloadToCache(session.boPhan, old)
 
   // Ghi đủ các khóa local để màn báo cáo chi tiết mở lại thấy ngay, không chờ Google Sheet.
-  writeJson(localKey('nhaplieu', [today(), session.boPhan, type, title]), localPayload)
-  writeJson(localKey('nhaplieu', [today(), session.boPhan, loai, title]), localPayload)
+  const deptKey = cacheTextKey(session.boPhan)
+  const loaiKey = cacheTextKey(loai)
+  const typeKey = cacheTextKey(type)
+  const titleKey = cacheTextKey(title)
+  ;[
+    localKey('nhaplieu', [today(), session.boPhan, type, title]),
+    localKey('nhaplieu', [today(), session.boPhan, loai, title]),
+    localKey('nhaplieu_v48', [today(), deptKey, typeKey, titleKey]),
+    localKey('nhaplieu_v48', [today(), deptKey, loaiKey, titleKey]),
+  ].forEach(key => writeJson(key, localPayload))
   upsertLocalDetailBundle(session, type, title, localPayload)
   window.dispatchEvent(new CustomEvent('erp-local-detail-updated', { detail: { boPhan: session.boPhan, type, title, loaiBaoCao: loai } }))
 }
@@ -286,8 +306,7 @@ function moduleIdForEntryType(type) {
 function upsertLocalDetailBundle(session, type, title, payload) {
   try {
     const loai = payload.loaiBaoCao || loaiForType(type)
-    const key = localKey('detail_bundle_v47', [today(), session.boPhan, loai, title])
-    writeJson(key, {
+    const bundle = {
       ...payload,
       hasSavedBefore: true,
       items: payload.items || [],
@@ -295,12 +314,20 @@ function upsertLocalDetailBundle(session, type, title, payload) {
       batDau: payload.batDau || '',
       ketThuc: payload.ketThuc || '',
       soGio: payload.soGio || '',
-    })
+    }
+    // V48: ghi key chuẩn hóa để Trộn đường / Trộn Đường / TRỘN_ĐƯỜNG đều đọc được ngay.
+    writeJson(detailBundleKey(today(), session.boPhan, loai, title), bundle)
+    // Giữ tương thích dữ liệu local các bản trước.
+    writeJson(localKey('detail_bundle_v47', [today(), session.boPhan, loai, title]), bundle)
   } catch {}
 }
 
 function readLocalDetailBundle(boPhan, loai, title) {
-  return readJson(localKey('detail_bundle_v47', [today(), boPhan, loai, title]), null)
+  return readFirstJson([
+    detailBundleKey(today(), boPhan, loai, title),
+    localKey('detail_bundle_v47', [today(), boPhan, loai, title]),
+    localKey('detail_bundle_v47', [today(), cacheTextKey(boPhan), loai, title]),
+  ], null)
 }
 
 function saveLocalBaoCaoTong(session, payload) {
@@ -646,23 +673,31 @@ function DeptDetailModal({ module, dept, onClose }) {
   const [active, setActive] = useState(module.titles[0])
   const [bundles, setBundles] = useState({})
   const [loading, setLoading] = useState(false)
-  const [msg, setMsg] = useState('Đang dùng dữ liệu lưu trên máy.')
+  const [msg, setMsg] = useState('')
 
   function readLocalBundles() {
     const next = {}
+    const deptKey = cacheTextKey(dept.boPhan)
+    const labelForKey = module.id === 'vang' || module.id === 'tonghop' ? 'Vắng mặt' : module.label
     module.titles.forEach(title => {
+      const titleKey = cacheTextKey(title)
       next[title] =
         readLocalDetailBundle(dept.boPhan, module.loai, title) ||
-        readJson(localKey('nhaplieu', [today(), dept.boPhan, module.loai, title]), null) ||
-        readJson(localKey('nhaplieu', [today(), dept.boPhan, module.label, title]), null) ||
-        readJson(localKey('nhaplieu', [today(), dept.boPhan, module.id === 'vang' || module.id === 'tonghop' ? 'Vắng mặt' : module.label, title]), null) ||
+        readFirstJson([
+          localKey('nhaplieu_v48', [today(), deptKey, cacheTextKey(module.loai), titleKey]),
+          localKey('nhaplieu_v48', [today(), deptKey, cacheTextKey(module.label), titleKey]),
+          localKey('nhaplieu_v48', [today(), deptKey, cacheTextKey(labelForKey), titleKey]),
+          localKey('nhaplieu', [today(), dept.boPhan, module.loai, title]),
+          localKey('nhaplieu', [today(), dept.boPhan, module.label, title]),
+          localKey('nhaplieu', [today(), dept.boPhan, labelForKey, title]),
+        ], null) ||
         getPreloadedToday(dept.boPhan)?.bundles?.[module.loai]?.[title] ||
         {}
     })
     return next
   }
 
-  function applyBundles(next, sourceMsg = 'Đang dùng dữ liệu lưu trên máy.') {
+  function applyBundles(next, sourceMsg = '') {
     setBundles(next)
     const first = module.titles.find(t => {
       const items = Array.isArray(next?.[t]?.items) ? next[t].items : []
@@ -676,7 +711,7 @@ function DeptDetailModal({ module, dept, onClose }) {
     window.__ERP_DEPT_DETAIL_ACTIVE__ = true
     let alive = true
     const local = readLocalBundles()
-    applyBundles(local, 'Đang dùng dữ liệu lưu trên máy.')
+    applyBundles(local, '')
     setLoading(false)
 
     // Đồng bộ nền nhưng KHÔNG được xóa/ghi đè dữ liệu vừa lưu trên máy.
@@ -691,7 +726,7 @@ function DeptDetailModal({ module, dept, onClose }) {
           if (localItems.length && remoteItems.length < localItems.length) return
           if (!remoteItems.length) return
           setBundles(prev => ({ ...prev, [title]: remote }))
-          setMsg('Đã đồng bộ nền.')
+          setMsg('')
         })
         .catch(() => {})
     })
@@ -702,7 +737,7 @@ function DeptDetailModal({ module, dept, onClose }) {
   useEffect(() => {
     const onLocalDetail = (event) => {
       if (event?.detail?.boPhan && !sameText(event.detail.boPhan, dept.boPhan)) return
-      applyBundles(readLocalBundles(), 'Đang dùng dữ liệu lưu trên máy.')
+      applyBundles(readLocalBundles(), '')
     }
     window.addEventListener('erp-local-detail-updated', onLocalDetail)
     return () => window.removeEventListener('erp-local-detail-updated', onLocalDetail)
@@ -737,7 +772,7 @@ function DeptDetailModal({ module, dept, onClose }) {
     <div className="dept-detail-list">
       {loading ? <div className="dept-empty">Đang tải dữ liệu...</div> : rows.length ? <table className="dept-detail-table"><thead><tr>{simpleAbsence ? <><th>STT</th><th>Họ và tên</th><th>Lý do vắng</th></> : <><th>#</th><th>Mã NV</th><th>Họ và tên</th><th>{module.id === 'tangca' || module.id === 'ngayle' ? 'Bộ phận/Giờ' : 'Nội dung'}</th></>}</tr></thead><tbody>{rows.map((p, i) => <tr key={`${active}_${p.maNv}_${i}`}>{simpleAbsence ? <><td>{i + 1}</td><td>{p.tenNv}</td><td>{p.trangThai || 'Có phép'}</td></> : <><td>{i + 1}</td><td>{p.maNv}</td><td>{p.tenNv}</td><td>{module.id === 'tangca' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 0} giờ` : module.id === 'ngayle' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 8} giờ` : (p.trangThai || active)}</td></>}</tr>)}</tbody></table> : <div className="dept-empty">Chưa có dữ liệu chi tiết cho mục này.</div>}
     </div>
-    <div className="dept-detail-footer"><span>{msg}</span><button className="primary-button mini" onClick={onClose}>Đóng</button></div>
+    <div className="dept-detail-footer"><button className="primary-button mini" onClick={onClose}>Đóng</button></div>
   </div></div>
 }
 function CompanyScreen({ session }) {
