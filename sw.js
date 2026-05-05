@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v38-pick-lock';
+const CACHE_NAME = 'erp-v30-ui-shell-v42-stable-ui';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {

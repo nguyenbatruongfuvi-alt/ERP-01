@@ -18,6 +18,7 @@ let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
 window.__ERP_DEPT_DETAIL_ACTIVE__ = false
+function isUserBusy() { return !!(window.__ERP_PICKING_ACTIVE__ || window.__ERP_DEPT_DETAIL_ACTIVE__) }
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -551,128 +552,88 @@ function ReportScreen({ session }) {
     <div style={{ height: 12 }} /><button className={saveButtonClass("primary-button", msg, saving)} disabled={saving} onClick={save}>{saving ? 'Đang lưu...' : msg.includes('ĐÃ LƯU') ? 'Đã lưu xong' : msg.includes('CHƯA LƯU') ? 'Lưu lại' : 'Nhập / Cập nhật báo cáo'}</button><Status text={msg} />
   </div>
 }
-
-function deptKeyMatch(a, b) { return stripVietnamese(a || '') === stripVietnamese(b || '') }
-const COMPANY_TABS = [
-  { key: 'tonghop', label: 'Tổng hợp' },
-  { key: 'tangca', label: 'Tăng ca' },
-  { key: 'biendong', label: 'Biến động' },
-  { key: 'vangmat', label: 'Vắng mặt' },
-  { key: 'ngayle', label: 'Làm ngày lễ' },
-]
-const DETAIL_TITLES = {
-  tonghop: ['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày'],
-  tangca: ['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất'],
-  biendong: ['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác'],
-  vangmat: ['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày'],
-  ngayle: ['Đăng ký làm ngày lễ'],
-}
-function typeForCompanyTab(tab) {
-  if (tab === 'tangca') return 'Tăng ca'
-  if (tab === 'biendong') return 'Biến động'
-  if (tab === 'ngayle') return 'Làm ngày lễ'
-  return 'Vắng mặt'
-}
-function readLocalNhapLieuPayloads(boPhan, type, title = '') {
-  const out = []
-  const add = (payload, source = '') => {
-    if (!payload || !deptKeyMatch(payload.boPhan, boPhan)) return
-    if (type && payload.loaiBaoCao && loaiForType(type) !== payload.loaiBaoCao && !(type === 'Vắng mặt' && payload.loaiBaoCao === 'Báo cáo vắng')) return
-    if (title && payload.chiTiet !== title) return
-    out.push({ ...payload, _source: source })
-  }
-  const direct = title ? readJson(localKey('nhaplieu', [today(), boPhan, type, title]), null) : null
-  add(direct, 'direct')
-  const pre = getPreloadedToday(boPhan)
-  const loai = loaiForType(type)
-  const bundles = pre?.bundles?.[loai] || {}
-  Object.keys(bundles).forEach(k => {
-    if (title && k !== title) return
-    const b = bundles[k]
-    add({ ngay: today(), boPhan, chiTiet: k, loaiBaoCao: loai, items: (b?.items || []).filter(x => x.selected !== false), batDau: b?.batDau || '', ketThuc: b?.ketThuc || '', soGio: b?.soGio || '' }, 'preload')
-  })
+function findPreloadForDeptAny(boPhan) {
+  const direct = getPreloadedToday(boPhan)
+  if (direct) return direct
+  const target = stripVietnamese(boPhan)
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i)
-    if (!key || !key.includes(LOCAL_SAVE_PREFIX) || !key.includes('_nhaplieu_')) continue
-    add(readJson(key, null), key)
+    if (!key || !key.includes(PRELOAD_PREFIX)) continue
+    const raw = readJson(key, null)
+    if (raw && stripVietnamese(raw.boPhan || '') === target) return raw
   }
-  const seen = new Set()
-  return out.filter(p => {
-    const id = `${p.boPhan}_${p.loaiBaoCao}_${p.chiTiet}_${p.requestId || p.savedAt || p.localDraftAt || p._source}`
-    if (seen.has(id)) return false
-    seen.add(id)
-    return true
-  })
+  return null
 }
-function getDetailItemsFromLocal(boPhan, tab, title) {
-  const type = typeForCompanyTab(tab)
-  const payloads = readLocalNhapLieuPayloads(boPhan, type, title)
-  const rows = []
-  payloads.forEach(payload => {
-    ;(payload.items || []).forEach(x => {
-      if (!x || x.selected === false) return
-      rows.push({
-        ...normalizeRow(x),
-        tenNv: x.tenNv || x.ten || '',
-        maNv: x.maNv || x.ma || '',
-        boPhan: x.boPhanGoc || x.boPhan || payload.boPhan,
-        boPhanGoc: x.boPhanGoc || x.boPhan || payload.boPhan,
-        chiTiet: payload.chiTiet || title,
-        trangThai: x.trangThai || '',
-        batDau: x.batDau || payload.batDau || '',
-        ketThuc: x.ketThuc || payload.ketThuc || '',
-        soGio: x.soGio || payload.soGio || '',
-      })
-    })
-  })
-  const map = new Map()
-  rows.forEach(r => { if (r.maNv) map.set(`${r.maNv}_${r.chiTiet}`, r) })
-  return Array.from(map.values())
-}
-function getDeptTabSummary(row, tab) {
-  const boPhan = row.boPhan
-  if (tab === 'tonghop') return {
-    aLabel: 'Tổng CN', a: row.tongCongNhan || 0,
-    bLabel: 'Có mặt', b: row.coMat || 0,
-    cLabel: 'Vắng', c: Number(row.vangBuoiSang || 0) + Number(row.vangBuoiChieu || 0) + Number(row.vangCaNgay || 0),
-    c2Label: 'Cả ngày', c2: row.vangCaNgay || 0,
+function findLocalNhapLieuAny(boPhan, type, title) {
+  const targetDept = stripVietnamese(boPhan)
+  const targetType = stripVietnamese(type)
+  const targetTitle = stripVietnamese(title)
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key || !key.includes(LOCAL_SAVE_PREFIX) || !key.includes('nhaplieu')) continue
+    const raw = readJson(key, null)
+    if (!raw) continue
+    const sameDept = stripVietnamese(raw.boPhan || '') === targetDept || stripVietnamese(key).includes(targetDept)
+    const sameType = stripVietnamese(raw.loaiBaoCao || raw.type || key).includes(targetType) || stripVietnamese(key).includes(targetType)
+    const sameTitle = stripVietnamese(raw.chiTiet || raw.title || key).includes(targetTitle) || stripVietnamese(key).includes(targetTitle)
+    if (sameDept && sameType && sameTitle) return raw
   }
-  if (tab === 'vangmat') {
-    const s = Number(row.vangBuoiSang || 0), c = Number(row.vangBuoiChieu || 0), n = Number(row.vangCaNgay || 0)
-    return { aLabel: 'Vắng sáng', a: s, bLabel: 'Vắng chiều', b: c, cLabel: 'Cả ngày', c: n, c2Label: 'Tổng vắng', c2: s + c + n }
-  }
-  const titles = DETAIL_TITLES[tab] || []
-  const all = titles.flatMap(t => getDetailItemsFromLocal(boPhan, tab, t))
-  const totalHours = all.reduce((s, x) => s + Number(x.soGio || 0), 0)
-  if (tab === 'tangca') return { aLabel: 'Tổng CN', a: row.tongCongNhan || 0, bLabel: 'Có tăng ca', b: all.length, cLabel: 'Tổng giờ', c: totalHours.toFixed(1), c2Label: 'Chi tiết', c2: all.length }
-  if (tab === 'biendong') return { aLabel: 'Tổng CN', a: row.tongCongNhan || 0, bLabel: 'Có dữ liệu', b: all.length, cLabel: 'Vắng', c: row.vangCaNgay || 0, c2Label: 'Chi tiết', c2: all.length }
-  return { aLabel: 'Tổng CN', a: row.tongCongNhan || 0, bLabel: 'Làm lễ', b: all.length, cLabel: 'Tổng giờ', c: totalHours.toFixed(1), c2Label: 'Chi tiết', c2: all.length }
+  return null
 }
-function CompanyDetailModal({ row, tab, onClose }) {
-  const [active, setActive] = useState((DETAIL_TITLES[tab] || [])[0] || '')
+function getDeptDetailBundle(boPhan, type, title) {
+  const local = findLocalNhapLieuAny(boPhan, type, title)
+  if (local && Array.isArray(local.items)) return local
+  const pre = findPreloadForDeptAny(boPhan)
+  const loai = loaiForType(type)
+  const bundle = pre?.bundles?.[loai]?.[title]
+  if (bundle && Array.isArray(bundle.items)) return bundle
+  return null
+}
+function getDeptDetailItems(boPhan, type, title) {
+  const bundle = getDeptDetailBundle(boPhan, type, title)
+  return (bundle?.items || []).map(normalizeRow).filter(x => x.selected !== false)
+}
+function DeptAbsenceDetailModal({ row, onClose }) {
+  const [tab, setTab] = useState('Vắng buổi sáng')
   const [kw, setKw] = useState('')
   useEffect(() => {
     window.__ERP_DEPT_DETAIL_ACTIVE__ = true
     return () => { window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
   }, [])
-  const titles = DETAIL_TITLES[tab] || []
-  const rows = getDetailItemsFromLocal(row.boPhan, tab, active)
-  const filtered = rows.filter(x => !kw.trim() || personSearchText(x).includes(stripVietnamese(kw)))
-  const s = getDeptTabSummary(row, tab)
-  const titleMap = { tonghop: 'Tổng hợp chi tiết', tangca: 'Tăng ca chi tiết', biendong: 'Biến động chi tiết', vangmat: 'Vắng mặt chi tiết', ngayle: 'Làm ngày lễ chi tiết' }
-  return <div className="modal-overlay"><div className="modal-panel modal-v23 company-detail-modal">
-    <div className="modal-head-lite modal-head-green"><button className="modal-back" onClick={onClose}>←</button><b>{titleMap[tab]} - {row.boPhan}</b><button className="modal-close" onClick={onClose}>×</button></div>
-    <div className="company-detail-top">
-      <div><span>👥 {s.aLabel}</span><b>{s.a}</b></div>
-      <div><span>✅ {s.bLabel}</span><b>{s.b}</b></div>
-      <div><span>📅 {s.cLabel}</span><b>{s.c}</b></div>
+  const titles = ['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']
+  const counts = {
+    'Vắng buổi sáng': Number(row?.vangBuoiSang || row?.vangSang || 0),
+    'Vắng buổi chiều': Number(row?.vangBuoiChieu || row?.vangChieu || 0),
+    'Vắng cả ngày': Number(row?.vangCaNgay || 0),
+  }
+  const all = getDeptDetailItems(row.boPhan, 'Vắng mặt', tab)
+  const q = stripVietnamese(kw)
+  const items = q ? all.filter(p => personSearchText(p).includes(q)) : all
+  const total = Number(row?.tongCongNhan || row?.tongCN || 0)
+  const present = Number(row?.coMat || 0)
+  const absent = Number(row?.vangBuoiSang || row?.vangSang || 0) + Number(row?.vangBuoiChieu || row?.vangChieu || 0) + Number(row?.vangCaNgay || 0)
+  return <div className="modal-overlay dept-detail-overlay"><div className="dept-detail-panel">
+    <div className="dept-detail-head"><button onClick={onClose}>×</button><b>Chi tiết vắng mặt</b><span /></div>
+    <div className="dept-info-card">
+      <div className="dept-info-icon">👥</div>
+      <div className="dept-info-main">
+        <div>Bộ phận: <b className="text-green">{row.boPhan}</b></div>
+        <p>Tổ trưởng: {row.toTruong || ''}</p>
+        <p>Tổng số công nhân: <b className="text-green">{total}</b></p>
+        <div className="dept-info-stats"><b className="text-green">Có mặt: {present}</b><i /> <b className="text-red">Vắng: {absent}</b></div>
+      </div>
     </div>
-    {titles.length > 1 && <div className="company-detail-tabs">{titles.map(t => <button key={t} className={active === t ? 'active' : ''} onClick={() => setActive(t)}>{t.replace('Vắng buổi ', '').replace('Tăng ca ', '')}<em>{getDetailItemsFromLocal(row.boPhan, tab, t).length}</em></button>)}</div>}
-    <div className="company-detail-search"><span>⌕</span><input value={kw} onChange={e => setKw(e.target.value)} placeholder="Tìm kiếm nhân viên..." />{kw && <button onClick={() => setKw('')}>×</button>}</div>
-    <div className="company-detail-list">
-      {filtered.length ? <table className="company-detail-table"><thead><tr><th>#</th><th>Mã NV</th><th>Họ và tên</th><th>{tab === 'tangca' || tab === 'ngayle' ? 'Bộ phận/Giờ' : tab === 'vangmat' || tab === 'tonghop' ? 'Lý do' : 'Bộ phận'}</th></tr></thead><tbody>{filtered.map((p, i) => <tr key={`${p.maNv}_${i}`}><td>{i + 1}</td><td>{p.maNv}</td><td>{p.tenNv}</td><td>{tab === 'tangca' || tab === 'ngayle' ? `${p.boPhanGoc || p.boPhan} · ${p.soGio || 0} giờ` : (p.trangThai || p.boPhanGoc || p.boPhan || '')}</td></tr>)}</tbody></table> : <div className="company-empty">Chưa có dữ liệu chi tiết lưu trên máy cho mục này.</div>}
+    <div className="dept-detail-tabs">
+      {titles.map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}><span>{t.replace('Vắng ', 'Vắng ')}</span><em>{counts[t] || 0}</em></button>)}
     </div>
-    <div className="company-detail-foot"><span>Cập nhật: {pad2(new Date().getHours())}:{pad2(new Date().getMinutes())}</span><button className="primary-button mini" onClick={onClose}>Đóng</button></div>
+    <div className="dept-detail-search"><span>⌕</span><input value={kw} onChange={e => setKw(e.target.value)} placeholder="Tìm kiếm nhân viên..." />{kw && <button onClick={() => setKw('')}>×</button>}</div>
+    <div className="dept-detail-table-wrap">
+      <table className="dept-detail-table"><thead><tr><th>STT</th><th>Họ và tên</th><th>Lý do vắng (nếu có)</th></tr></thead><tbody>
+        {items.length ? items.map((p, i) => <tr key={p.maNv || i}><td>{i + 1}</td><td>{p.tenNv}</td><td>{p.trangThai || ''}</td></tr>) : <tr><td colSpan="3" className="dept-empty">Chưa có dữ liệu chi tiết lưu trên máy cho mục này.</td></tr>}
+      </tbody></table>
+    </div>
+    <div className="dept-detail-note">ⓘ Lưu ý: Dữ liệu vắng mặt được ưu tiên lấy từ dữ liệu đã lưu trên máy, sau đó mới đồng bộ nền.</div>
+    <button className="primary-button dept-close" onClick={onClose}>Đóng</button>
   </div></div>
 }
 function CompanyScreen({ session }) {
@@ -680,7 +641,6 @@ function CompanyScreen({ session }) {
   const initialCache = findCompanyReportCache(today())
   const [data, setData] = useState(() => initialCache?.data || defaultCompanyData)
   const [msg, setMsg] = useState(() => initialCache?.data ? '⚡ Đang hiển thị dữ liệu đã lưu trên máy.' : '')
-  const [activeTab, setActiveTab] = useState('tonghop')
   const [detailRow, setDetailRow] = useState(null)
   useEffect(() => {
     const loadLocal = () => {
@@ -693,7 +653,6 @@ function CompanyScreen({ session }) {
     }
     const local = loadLocal()
     const onUpdated = (event) => {
-      if (window.__ERP_DEPT_DETAIL_ACTIVE__) return
       if (event?.detail) {
         setData(event.detail)
         setMsg('✅ Đã cập nhật báo cáo công ty.')
@@ -703,19 +662,20 @@ function CompanyScreen({ session }) {
     }
     window.addEventListener('erp-company-report-updated', onUpdated)
     if (!navigator.onLine) {
-      if (!local?.data) setMsg('Máy đang offline. Chưa có dữ liệu báo cáo công ty lưu trên máy.')
+      if (!local?.data) setMsg('Đang offline và chưa có dữ liệu báo cáo công ty lưu trên máy.')
       return () => window.removeEventListener('erp-company-report-updated', onUpdated)
     }
-    const refresh = (force = false) => {
-      if (window.__ERP_PICKING_ACTIVE__ || window.__ERP_DEPT_DETAIL_ACTIVE__) return
-      smartRefreshCompanyReport(session?.boPhan || readJson(LAST_DEPT_KEY, ''), { force }).catch(e => { if (!local?.data) setMsg(e.message) })
+
+    const safeRefresh = (force = false) => {
+      if (isUserBusy()) return
+      smartRefreshCompanyReport(session?.boPhan || readJson(LAST_DEPT_KEY, ''), force ? { force: true } : {}).catch(e => { if (!local?.data) setMsg(e.message) })
     }
-    refresh(false)
-    const onFocus = () => refresh(false)
-    const onOnline = () => refresh(true)
+    safeRefresh(false)
+    const onFocus = () => safeRefresh(false)
+    const onOnline = () => safeRefresh(true)
     window.addEventListener('focus', onFocus)
     window.addEventListener('online', onOnline)
-    const t = setInterval(() => refresh(false), SMART_REFRESH_MS)
+    const t = setInterval(() => safeRefresh(false), SMART_REFRESH_MS)
     return () => {
       window.removeEventListener('erp-company-report-updated', onUpdated)
       window.removeEventListener('focus', onFocus)
@@ -723,25 +683,11 @@ function CompanyScreen({ session }) {
       clearInterval(t)
     }
   }, [session?.boPhan])
-  const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)']]
-  return <><div className="company-tabs">{COMPANY_TABS.map(t => <button key={t.key} className={activeTab === t.key ? 'active' : ''} onClick={() => setActiveTab(t.key)}>{t.label}</button>)}</div>
-    <div className="summary-kpi-card"><div className="summary-kpi-grid company-kpi-compact">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
-    <div className="summary-table-card company-card-wrap"><div className="summary-title">{activeTab === 'tonghop' ? 'Tổng hợp bộ phận' : activeTab === 'tangca' ? 'Tăng ca bộ phận' : activeTab === 'biendong' ? 'Biến động bộ phận' : activeTab === 'vangmat' ? 'Vắng mặt bộ phận' : 'Làm ngày lễ bộ phận'}</div><Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} />
-      <div className="company-card-list">{(data.rows || []).map((r, i) => {
-        const s = getDeptTabSummary(r, activeTab)
-        const icons = ['🏭', '📦', '🥭', '🚚', '👥']
-        return <button className="company-dept-card" key={r.boPhan || i} onClick={() => setDetailRow(r)}>
-          <div className="company-card-head"><div className="company-card-icon">{icons[i % icons.length]}</div><div><b>{r.boPhan}</b><span>Tổ trưởng: {r.toTruong || '-'}</span></div><em>›</em></div>
-          <div className="company-card-stats">
-            <div><span>👥 {s.aLabel}</span><b>{s.a}</b></div>
-            <div><span>✅ {s.bLabel}</span><b className="text-green">{s.b}</b></div>
-            <div><span>🌞 {s.cLabel}</span><b className="text-orange">{s.c}</b></div>
-            <div><span>📅 {s.c2Label}</span><b className="text-red">{s.c2}</b></div>
-          </div>
-        </button>
-      })}</div>
-      <div className="company-total-line"><span>Tổng cộng: {(data.rows || []).length} bộ phận</span><span>Tổng nhân viên: {data.tongCN || 0}</span></div>
-    </div>{detailRow && <CompanyDetailModal row={detailRow} tab={activeTab} onClose={() => setDetailRow(null)} />}</>
+  const totals = [['Tổng công nhân', data.tongCN || 0, 'var(--color-blue)'], ['Có mặt', data.coMat || 0, 'var(--color-green)'], ['Vắng buổi sáng', data.vangSang || 0, 'var(--color-orange)'], ['Vắng buổi chiều', data.vangChieu || 0, 'var(--color-orange)'], ['Vắng cả ngày', data.vangCaNgay || 0, 'var(--color-red)']]
+  return <><div className="summary-kpi-card"><div className="summary-kpi-grid">{totals.map(([label, value, color]) => <div className="summary-kpi" key={label}><div className="summary-kpi-label">{label}</div><div className="summary-kpi-number" style={{ color }}>{value}</div></div>)}</div></div>
+    <div className="summary-table-card"><div className="summary-title">Tổng hợp bộ phận</div><div className="table-scroll"><table className="summary-table company-click-table"><thead><tr><th>STT</th><th>Bộ phận</th><th>Tổ trưởng</th><th>Tổng CN</th><th>Có mặt</th><th>Vắng sáng</th><th>Vắng chiều</th><th>Vắng cả ngày</th><th></th></tr></thead><tbody>{(data.rows || []).map((r, i) => <tr key={r.boPhan || i} onClick={() => setDetailRow(r)}><td>{i + 1}</td><td><b>{r.boPhan}</b></td><td>{r.toTruong}</td><td>{r.tongCongNhan}</td><td className="text-green">{r.coMat}</td><td className="text-orange">{r.vangBuoiSang}</td><td className="text-orange">{r.vangBuoiChieu}</td><td className="text-red">{r.vangCaNgay}</td><td className="row-chevron">›</td></tr>)}</tbody></table></div><Status text={msg} ok={!msg.includes('offline') && !msg.includes('lỗi')} /></div>
+    {detailRow && <DeptAbsenceDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
+  </>
 }
 function useStaff(session, cache) {
   const preload = session?.boPhan ? getPreloadedToday(session.boPhan) : null
@@ -827,21 +773,14 @@ function mergeBundleRows(bundle, staff, session, type, title) {
     return { rows: base, batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
   }
 
-  // Không tự động chọn sẵn nhân viên cho mục Tăng ca.
+  // Không tự động sắp lại danh sách sau khi chọn/lưu.
+  // Giữ nguyên vị trí nhân viên để người dùng tiếp tục chọn người kế bên.
   const first = saved.find(x => x.batDau || x.ketThuc || x.soGio) || saved[0] || {}
-  // Giữ nguyên thứ tự danh sách gốc; người đã lưu chỉ được đánh dấu đã chọn, không nhảy lên đầu.
   return { rows: base, batDau: first.batDau || '', ketThuc: first.ketThuc || '', soGio: first.soGio || '', hasSavedBefore }
 }
 function sameDeptRow(p, dept) { return stripVietnamese(p?.boPhanGoc || p?.boPhan) === stripVietnamese(dept) }
 function sortPickRows(list, dept) {
-  // Giữ vị trí danh sách ổn định khi bấm Chọn/Đã chọn.
-  // Không đưa nhân viên đã chọn lên đầu nữa, để người dùng chọn tiếp người bên cạnh.
-  return (list || []).slice().sort((a, b) => {
-    const ao = (a.outside || !sameDeptRow(a, dept)) ? 1 : 0
-    const bo = (b.outside || !sameDeptRow(b, dept)) ? 1 : 0
-    if (ao !== bo) return ao - bo
-    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
-  })
+  return (list || []).slice()
 }
 
 function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
@@ -864,8 +803,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
 
   useEffect(() => {
     window.__ERP_PICKING_ACTIVE__ = true
-    return () => { window.__ERP_PICKING_ACTIVE__ = false
-window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
+    return () => { window.__ERP_PICKING_ACTIVE__ = false }
   }, [])
 
   function writePickDraft(nextRows = rows, extra = {}) {
@@ -906,7 +844,9 @@ window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
       if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
       setLoading(false)
     } else {
-      setLoading(true)
+      // Không để người dùng phải chờ API: mở màn là có ngay danh sách nhân viên từ cache/local.
+      setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false, boPhanGoc: p.boPhanGoc || p.boPhan || session.boPhan })))
+      setLoading(false)
     }
     api('getNhapLieuBundleV309', [today(), session.boPhan, loai, title])
       .then(bundle => {
@@ -941,6 +881,11 @@ window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
       .finally(() => alive && setLoading(false))
     return () => { alive = false }
   }, [title, type, session.boPhan])
+
+  useEffect(() => {
+    if (rows.length || !(staff || []).length) return
+    setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false, boPhanGoc: p.boPhanGoc || p.boPhan || session.boPhan })))
+  }, [staff.length, rows.length, session.boPhan])
 
   const selectedRows = rows.filter(x => x.selected)
   const selectedCount = selectedRows.length
@@ -1013,15 +958,17 @@ window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
 
   async function save() {
     if (saving) return
+    setSaving(true)
     if (type === 'Tăng ca' && (!batDau || !ketThuc || !soGio)) {
       setMsg('Vui lòng chọn giờ bắt đầu và giờ kết thúc.')
+      setSaving(false)
       return
     }
     if (isTransfer && !transferTarget.trim()) {
       setMsg('Vui lòng chọn tổ chuyển đến trước khi lưu.')
+      setSaving(false)
       return
     }
-    setSaving(true)
     const loaiBaoCao = type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type
     const items = selectedRows.map(x => ({
       maNv: x.maNv,
@@ -1057,7 +1004,7 @@ window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
     <div className="person-info-lite"><b>{p.tenNv}{(p.outside || !sameDeptRow(p, session.boPhan)) && !isTransfer ? ' (hỗ trợ)' : ''}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}{(p.outside || !sameDeptRow(p, session.boPhan)) ? ' · ngoài tổ' : ''}{type === 'Tăng ca' && <> · Giờ TC: {batDau || '--:--'} → {ketThuc || '--:--'} = {soGio || '0'} giờ</>}</div></div>{actionControls(p)}</div>
 
   return <div className="modal-overlay"><div className="modal-panel modal-v23"><div className="modal-head-lite modal-head-green"><button className="modal-back" onClick={onClose}>←</button><b>{title}</b><button className="modal-close" onClick={onClose}>×</button></div>
-    <div className="modal-fixed-top">
+    {(type === 'Tăng ca' || isTransfer || isHoliday) && <div className="modal-fixed-top modal-fixed-compact">
       {type === 'Tăng ca' && <div className="overtime-compact-grid">
         <div><label className="field-label overtime-label">Bắt đầu</label><select className="form-control form-control-sm time-select-control" value={batDau} onChange={e => { setBatDau(e.target.value); writePickDraft(rows, { batDau: e.target.value }) }}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
         <div><label className="field-label overtime-label">Kết thúc</label><select className="form-control form-control-sm time-select-control" value={ketThuc} onChange={e => { setKetThuc(e.target.value); writePickDraft(rows, { ketThuc: e.target.value }) }}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
@@ -1065,13 +1012,13 @@ window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
       </div>}
       {isTransfer && <div className="transfer-target-box"><label className="field-label">Tổ chuyển đến</label><select className="form-control form-control-sm" value={transferTarget} onChange={e => { setTransferTarget(e.target.value); writePickDraft(rows, { transferTarget: e.target.value }) }}><option value="">Chọn tổ chuyển đến</option>{departmentOptions.map(bp => <option key={bp} value={bp}>{bp}</option>)}</select></div>}
       {isHoliday && <div className="grid2-lite"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={holidayFrom} onChange={e => { setHolidayFrom(e.target.value); writePickDraft(rows, { holidayFrom: e.target.value }) }} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={holidayTo} onChange={e => { setHolidayTo(e.target.value); writePickDraft(rows, { holidayTo: e.target.value }) }} /></div></div>}
+    </div>}
+    <div className="pick-scroll-area pick-scroll-compact">
       <div className="note-compact summary-v23"><div>✅ Đã chọn: <b>{selectedCount}</b> nhân viên</div><span>Trong tổ: {inTeamCount} · Ngoài tổ: {outsideCount}{type === 'Tăng ca' ? ` · Tổng TG: ${totalHours} giờ` : ''}{isHoliday ? ` · Ngày lễ: ${fromInputDate(holidayFrom)} - ${fromInputDate(holidayTo)}` : ''}</span>{isTransfer && transferTarget && <span>Chuyển đến: <b>{transferTarget}</b> · sang tổ nhận sẽ hiện <b>(hỗ trợ)</b></span>}</div>
-      {loading && <div className="note-compact loading-v23">Đang tải dữ liệu...</div>}
+      {loading && <div className="note-compact loading-v23">Đang đồng bộ nền, dữ liệu trên máy vẫn dùng được...</div>}
       <div className="pick-section-row" onClick={() => setInTeamOpen(v => !v)}><div><b>1. Chọn nhân viên trong tổ</b> <span>({session.boPhan})</span></div><div className="section-right"><em>{inTeamRows.length}</em><i>{inTeamOpen ? '⌄' : '›'}</i></div></div>
       <div className="pick-section-row" onClick={() => setOutsideOpen(v => !v)}><div><b>2. Thêm nhân viên từ bộ phận khác</b></div><div className="section-right"><em>{outsideCount}</em><i>{outsideOpen ? '⌃' : '›'}</i></div></div>
       {outsideOpen && <div className="external-search-box"><span className="search-ico">⌕</span><input value={kw} onChange={e => setKw(e.target.value)} placeholder="Nhập tên, mã số (có dấu hoặc không dấu)..." />{kw && <button onClick={() => setKw('')}>×</button>}</div>}
-    </div>
-    <div className="pick-scroll-area">
       {kw && outsideOpen && <div className="external-results">{searchResults.length ? searchResults.map(p => {
         const current = rows.find(x => x.maNv === p.maNv) || p
         return <div className={`pick-row-lite external ${current.selected ? 'selected' : ''}`} key={`sr_${p.maNv}`}>
@@ -1326,10 +1273,10 @@ function App() {
   useEffect(() => {
     if (!session?.boPhan) return
     const run = () => {
-      if (window.__ERP_PICKING_ACTIVE__ || window.__ERP_DEPT_DETAIL_ACTIVE__) return
+      if (isUserBusy()) return
       if (!navigator.onLine) return
       preloadTodayData(session.boPhan).then(data => {
-        if (window.__ERP_PICKING_ACTIVE__ || window.__ERP_DEPT_DETAIL_ACTIVE__) return
+        if (isUserBusy()) return
         const merged = applyPreloadToCache(session.boPhan, data)
         if (merged) setCache(merged)
       }).catch(() => {})
