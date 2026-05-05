@@ -15,6 +15,8 @@ const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
 let SYNC_QUEUE_RUNNING = false
+// Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
+window.__ERP_PICKING_ACTIVE__ = false
 
 function pad2(n) { return String(n).padStart(2, '0') }
 
@@ -726,11 +728,43 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   const [holidayTo, setHolidayTo] = useState(() => toInputDate(today()))
 
   useEffect(() => {
+    window.__ERP_PICKING_ACTIVE__ = true
+    return () => { window.__ERP_PICKING_ACTIVE__ = false }
+  }, [])
+
+  function writePickDraft(nextRows = rows, extra = {}) {
+    const selected = (nextRows || []).filter(x => x.selected)
+    writeJson(draftKeyFor(session, type, title), {
+      localDraftAt: Date.now(),
+      ngay: today(),
+      boPhan: session.boPhan,
+      toTruong: session.tenToTruong,
+      chiTiet: title,
+      items: selected,
+      batDau: extra.batDau ?? batDau,
+      ketThuc: extra.ketThuc ?? ketThuc,
+      soGio: extra.soGio ?? calcOvertimeHours(extra.batDau ?? batDau, extra.ketThuc ?? ketThuc),
+      boPhanChuyenDen: extra.transferTarget ?? transferTarget,
+      toChuyenDen: extra.transferTarget ?? transferTarget,
+      tuNgay: extra.holidayFrom ? fromInputDate(extra.holidayFrom) : fromInputDate(holidayFrom),
+      denNgay: extra.holidayTo ? fromInputDate(extra.holidayTo) : fromInputDate(holidayTo),
+    })
+  }
+
+  useEffect(() => {
     let alive = true
     const loai = loaiForType(type)
     const pre = (cache?.today?.boPhan === session.boPhan ? cache.today : getPreloadedToday(session.boPhan))
     const preBundle = pre?.bundles?.[loai]?.[title]
-    if (preBundle) {
+    const localDraft = readJson(draftKeyFor(session, type, title), null)
+    if (localDraft && Array.isArray(localDraft.items)) {
+      const map = new Map(localDraft.items.map(x => [x.maNv, x]))
+      const draftRows = mergeBundleRows({ items: localDraft.items, batDau: localDraft.batDau, ketThuc: localDraft.ketThuc }, staff, session, type, title)
+      setRows(sortPickRows(draftRows.rows.map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })), session.boPhan))
+      if (type === 'Tăng ca') { setBatDau(localDraft.batDau || ''); setKetThuc(localDraft.ketThuc || '') }
+      setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
+      setLoading(false)
+    } else if (preBundle) {
       const merged = mergeBundleRows(preBundle, staff, session, type, title)
       setRows(sortPickRows(merged.rows, session.boPhan))
       if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
@@ -741,6 +775,8 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     api('getNhapLieuBundleV309', [today(), session.boPhan, loai, title])
       .then(bundle => {
         if (!alive) return
+        const activeDraft = readJson(draftKeyFor(session, type, title), null)
+        if (activeDraft?.localDraftAt && activeDraft.localDraftAt >= (localDraft?.localDraftAt || 0)) return
         const merged = mergeBundleRows(bundle, staff, session, type, title)
         setRows(sortPickRows(merged.rows, session.boPhan))
         if (type === 'Tăng ca') {
@@ -768,7 +804,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       })
       .finally(() => alive && setLoading(false))
     return () => { alive = false }
-  }, [title, type, session.boPhan, cache])
+  }, [title, type, session.boPhan])
 
   const selectedRows = rows.filter(x => x.selected)
   const selectedCount = selectedRows.length
@@ -815,14 +851,27 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   }, [kw, session.boPhan])
 
   function defaultStatus() { return type === 'Vắng mặt' ? 'Có phép' : 'Đã chọn' }
-  function toggle(ma) { setRows(list => sortPickRows(list.map(x => x.maNv === ma ? { ...x, selected: !x.selected, trangThai: x.trangThai || defaultStatus() } : x), session.boPhan)) }
-  function setStatus(ma, value) { setRows(list => list.map(x => x.maNv === ma ? { ...x, trangThai: value } : x)) }
+  function toggle(ma) {
+    setRows(list => {
+      const next = sortPickRows(list.map(x => x.maNv === ma ? { ...x, selected: !x.selected, trangThai: x.trangThai || defaultStatus() } : x), session.boPhan)
+      writePickDraft(next)
+      return next
+    })
+  }
+  function setStatus(ma, value) {
+    setRows(list => {
+      const next = list.map(x => x.maNv === ma ? { ...x, trangThai: value } : x)
+      writePickDraft(next)
+      return next
+    })
+  }
   function addExternal(p) {
     const person = { ...normalizeRow(p), boPhanGoc: p.boPhanGoc || p.boPhan || '', outside: true, selected: true, trangThai: p.trangThai || defaultStatus() }
     setRows(list => {
       const exists = list.some(x => x.maNv === person.maNv)
-      const next = exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [person, ...list]
-      return sortPickRows(next, session.boPhan)
+      const next = sortPickRows(exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [person, ...list], session.boPhan)
+      writePickDraft(next)
+      return next
     })
   }
 
@@ -873,12 +922,12 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   return <div className="modal-overlay"><div className="modal-panel modal-v23"><div className="modal-head-lite modal-head-green"><button className="modal-back" onClick={onClose}>←</button><b>{title}</b><button className="modal-close" onClick={onClose}>×</button></div>
     <div className="modal-fixed-top">
       {type === 'Tăng ca' && <div className="overtime-compact-grid">
-        <div><label className="field-label overtime-label">Bắt đầu</label><select className="form-control form-control-sm time-select-control" value={batDau} onChange={e => setBatDau(e.target.value)}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
-        <div><label className="field-label overtime-label">Kết thúc</label><select className="form-control form-control-sm time-select-control" value={ketThuc} onChange={e => setKetThuc(e.target.value)}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
+        <div><label className="field-label overtime-label">Bắt đầu</label><select className="form-control form-control-sm time-select-control" value={batDau} onChange={e => { setBatDau(e.target.value); writePickDraft(rows, { batDau: e.target.value }) }}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
+        <div><label className="field-label overtime-label">Kết thúc</label><select className="form-control form-control-sm time-select-control" value={ketThuc} onChange={e => { setKetThuc(e.target.value); writePickDraft(rows, { ketThuc: e.target.value }) }}><option value="">-- Chọn giờ --</option>{timeOptions.map(v => <option key={v} value={v}>{v}</option>)}</select></div>
         <div><label className="field-label overtime-label">Số giờ</label><input className="form-control form-control-sm overtime-hours-input" value={soGio} readOnly /></div>
       </div>}
-      {isTransfer && <div className="transfer-target-box"><label className="field-label">Tổ chuyển đến</label><select className="form-control form-control-sm" value={transferTarget} onChange={e => setTransferTarget(e.target.value)}><option value="">Chọn tổ chuyển đến</option>{departmentOptions.map(bp => <option key={bp} value={bp}>{bp}</option>)}</select></div>}
-      {isHoliday && <div className="grid2-lite"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={holidayFrom} onChange={e => setHolidayFrom(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={holidayTo} onChange={e => setHolidayTo(e.target.value)} /></div></div>}
+      {isTransfer && <div className="transfer-target-box"><label className="field-label">Tổ chuyển đến</label><select className="form-control form-control-sm" value={transferTarget} onChange={e => { setTransferTarget(e.target.value); writePickDraft(rows, { transferTarget: e.target.value }) }}><option value="">Chọn tổ chuyển đến</option>{departmentOptions.map(bp => <option key={bp} value={bp}>{bp}</option>)}</select></div>}
+      {isHoliday && <div className="grid2-lite"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={holidayFrom} onChange={e => { setHolidayFrom(e.target.value); writePickDraft(rows, { holidayFrom: e.target.value }) }} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={holidayTo} onChange={e => { setHolidayTo(e.target.value); writePickDraft(rows, { holidayTo: e.target.value }) }} /></div></div>}
       <div className="note-compact summary-v23"><div>✅ Đã chọn: <b>{selectedCount}</b> nhân viên</div><span>Trong tổ: {inTeamCount} · Ngoài tổ: {outsideCount}{type === 'Tăng ca' ? ` · Tổng TG: ${totalHours} giờ` : ''}{isHoliday ? ` · Ngày lễ: ${fromInputDate(holidayFrom)} - ${fromInputDate(holidayTo)}` : ''}</span>{isTransfer && transferTarget && <span>Chuyển đến: <b>{transferTarget}</b> · sang tổ nhận sẽ hiện <b>(hỗ trợ)</b></span>}</div>
       {loading && <div className="note-compact loading-v23">Đang tải dữ liệu...</div>}
       <div className="pick-section-row" onClick={() => setInTeamOpen(v => !v)}><div><b>1. Chọn nhân viên trong tổ</b> <span>({session.boPhan})</span></div><div className="section-right"><em>{inTeamRows.length}</em><i>{inTeamOpen ? '⌄' : '›'}</i></div></div>
@@ -1140,8 +1189,13 @@ function App() {
   useEffect(() => {
     if (!session?.boPhan) return
     const run = () => {
+      if (window.__ERP_PICKING_ACTIVE__) return
       if (!navigator.onLine) return
-      preloadTodayData(session.boPhan).then(data => { const merged = applyPreloadToCache(session.boPhan, data); if (merged) setCache(merged) }).catch(() => {})
+      preloadTodayData(session.boPhan).then(data => {
+        if (window.__ERP_PICKING_ACTIVE__) return
+        const merged = applyPreloadToCache(session.boPhan, data)
+        if (merged) setCache(merged)
+      }).catch(() => {})
       smartRefreshCompanyReport(session.boPhan).catch(() => {})
     }
     const onVisible = () => { if (document.visibilityState === 'visible') run() }
