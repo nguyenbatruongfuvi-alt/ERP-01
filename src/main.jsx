@@ -640,7 +640,10 @@ async function fetchDetailRowsFromSheet(module, dept) {
     if (r.boPhan && !sameText(r.boPhan, dept.boPhan) && !sameText(r.boPhanGoc, dept.boPhan)) return false
     return module.titles.some(t => sameText(r.chiTiet, t))
   })
-  writeJson(detailCacheKey(module, dept), { rows: clean, cachedAt: Date.now(), ngay: today(), boPhan: dept.boPhan, loaiBaoCao: module.loai })
+  // Chỉ ghi cache khi có dữ liệu thật; không để lần đồng bộ rỗng ghi đè dữ liệu đã lưu trên máy.
+  if (clean.length) {
+    writeJson(detailCacheKey(module, dept), { rows: clean, cachedAt: Date.now(), ngay: today(), boPhan: dept.boPhan, loaiBaoCao: module.loai })
+  }
   return clean
 }
 function DeptStat({ icon, label, value, tone = '' }) {
@@ -688,11 +691,17 @@ function DeptDetailModal({ module, dept, onClose }) {
     }
     fetchDetailRowsFromSheet(module, dept).then(rows => {
       if (!alive) return
+      // Nếu Google Sheet trả rỗng/tạm lỗi nhưng máy đang có dữ liệu, giữ nguyên dữ liệu đang hiển thị.
+      // Tránh lỗi: dữ liệu hiện 1-2 giây rồi bị xóa mất.
+      if (!rows.length && localRows.length) {
+        setMsg('Đang dùng dữ liệu lưu trên máy.')
+        return
+      }
       const next = rowsToBundles(module, dept, rows)
       setBundles(next)
       const first = module.titles.find(t => (next[t]?.items || []).length > 0)
       if (first) setActive(first)
-      setMsg('Cập nhật: ' + hhmm())
+      setMsg(rows.length ? ('Cập nhật: ' + hhmm()) : 'Chưa có dữ liệu chi tiết lưu trên máy cho mục này.')
     }).catch(e => {
       if (!alive) return
       setMsg(localRows.length ? 'Đang dùng dữ liệu lưu trên máy.' : (e?.message || 'Chưa lấy được dữ liệu chi tiết.'))
@@ -859,15 +868,8 @@ function mergeBundleRows(bundle, staff, session, type, title) {
 }
 function sameDeptRow(p, dept) { return stripVietnamese(p?.boPhanGoc || p?.boPhan) === stripVietnamese(dept) }
 function sortPickRows(list, dept) {
-  return (list || []).slice().sort((a, b) => {
-    const as = a.selected ? 1 : 0
-    const bs = b.selected ? 1 : 0
-    if (bs !== as) return bs - as
-    const ao = (a.outside || !sameDeptRow(a, dept)) ? 1 : 0
-    const bo = (b.outside || !sameDeptRow(b, dept)) ? 1 : 0
-    if (ao !== bo) return ao - bo
-    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
-  })
+  // Giữ nguyên thứ tự đang nhìn thấy; không đưa người đã chọn lên đầu.
+  return (list || []).slice()
 }
 
 function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
@@ -890,9 +892,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
 
   useEffect(() => {
     window.__ERP_PICKING_ACTIVE__ = true
-    return () => { window.__ERP_PICKING_ACTIVE__ = false
-window.__ERP_DEPT_DETAIL_ACTIVE__ = false
-function erpUserBusy() { return !!(window.__ERP_PICKING_ACTIVE__ || window.__ERP_DEPT_DETAIL_ACTIVE__) } }
+    return () => { window.__ERP_PICKING_ACTIVE__ = false }
   }, [])
 
   function writePickDraft(nextRows = rows, extra = {}) {
@@ -933,7 +933,11 @@ function erpUserBusy() { return !!(window.__ERP_PICKING_ACTIVE__ || window.__ERP
       if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
       setLoading(false)
     } else {
-      setLoading(true)
+      // Không chờ API mới hiện danh sách. Dùng ngay danh sách nhân sự đã có trên máy,
+      // rồi đồng bộ nền giống màn Tăng ca đang chạy ổn định.
+      setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })))
+      setMsg('Đang dùng danh sách nhân sự lưu trên máy. Đang đồng bộ nền...')
+      setLoading(false)
     }
     api('getNhapLieuBundleV309', [today(), session.boPhan, loai, title])
       .then(bundle => {
@@ -1091,13 +1095,13 @@ function erpUserBusy() { return !!(window.__ERP_PICKING_ACTIVE__ || window.__ERP
       </div>}
       {isTransfer && <div className="transfer-target-box"><label className="field-label">Tổ chuyển đến</label><select className="form-control form-control-sm" value={transferTarget} onChange={e => { setTransferTarget(e.target.value); writePickDraft(rows, { transferTarget: e.target.value }) }}><option value="">Chọn tổ chuyển đến</option>{departmentOptions.map(bp => <option key={bp} value={bp}>{bp}</option>)}</select></div>}
       {isHoliday && <div className="grid2-lite"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={holidayFrom} onChange={e => { setHolidayFrom(e.target.value); writePickDraft(rows, { holidayFrom: e.target.value }) }} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={holidayTo} onChange={e => { setHolidayTo(e.target.value); writePickDraft(rows, { holidayTo: e.target.value }) }} /></div></div>}
+    </div>
+    <div className="pick-scroll-area">
       <div className="note-compact summary-v23"><div>✅ Đã chọn: <b>{selectedCount}</b> nhân viên</div><span>Trong tổ: {inTeamCount} · Ngoài tổ: {outsideCount}{type === 'Tăng ca' ? ` · Tổng TG: ${totalHours} giờ` : ''}{isHoliday ? ` · Ngày lễ: ${fromInputDate(holidayFrom)} - ${fromInputDate(holidayTo)}` : ''}</span>{isTransfer && transferTarget && <span>Chuyển đến: <b>{transferTarget}</b> · sang tổ nhận sẽ hiện <b>(hỗ trợ)</b></span>}</div>
       {loading && <div className="note-compact loading-v23">Đang tải dữ liệu...</div>}
       <div className="pick-section-row" onClick={() => setInTeamOpen(v => !v)}><div><b>1. Chọn nhân viên trong tổ</b> <span>({session.boPhan})</span></div><div className="section-right"><em>{inTeamRows.length}</em><i>{inTeamOpen ? '⌄' : '›'}</i></div></div>
       <div className="pick-section-row" onClick={() => setOutsideOpen(v => !v)}><div><b>2. Thêm nhân viên từ bộ phận khác</b></div><div className="section-right"><em>{outsideCount}</em><i>{outsideOpen ? '⌃' : '›'}</i></div></div>
       {outsideOpen && <div className="external-search-box"><span className="search-ico">⌕</span><input value={kw} onChange={e => setKw(e.target.value)} placeholder="Nhập tên, mã số (có dấu hoặc không dấu)..." />{kw && <button onClick={() => setKw('')}>×</button>}</div>}
-    </div>
-    <div className="pick-scroll-area">
       {kw && outsideOpen && <div className="external-results">{searchResults.length ? searchResults.map(p => {
         const current = rows.find(x => x.maNv === p.maNv) || p
         return <div className={`pick-row-lite external ${current.selected ? 'selected' : ''}`} key={`sr_${p.maNv}`}>
