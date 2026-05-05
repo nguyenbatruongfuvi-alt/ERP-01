@@ -234,6 +234,84 @@ function getLocalCount(boPhan, loai, title) {
   const pre = getPreloadedToday(boPhan)
   return Number(pre?.counts?.[loai]?.[title] || 0)
 }
+
+function modulesForNhapLieuType(type) {
+  if (type === 'Vắng mặt') return companyModules.filter(m => m.id === 'vang' || m.id === 'tonghop')
+  if (type === 'Tăng ca') return companyModules.filter(m => m.id === 'tangca')
+  if (type === 'Biến động') return companyModules.filter(m => m.id === 'biendong')
+  if (type === 'Làm ngày lễ') return companyModules.filter(m => m.id === 'ngayle')
+  return []
+}
+function updateLocalDetailCacheFromNhapLieu(session, type, title, payload) {
+  try {
+    const modules = modulesForNhapLieuType(type)
+    if (!modules.length) return
+    modules.forEach(module => {
+      const dept = { boPhan: session.boPhan, toTruong: session.tenToTruong }
+      const key = detailCacheKey(module, dept)
+      const old = readJson(key, null)
+      const oldRows = Array.isArray(old?.rows) ? old.rows : []
+      const cleanOld = oldRows.filter(r => !sameText(detailValue(r, ['chiTiet', 'CHI_TIET', 'title'], ''), title))
+      const nextRows = (payload.items || []).map(x => ({
+        ...x,
+        selected: true,
+        ngay: payload.ngay || today(),
+        NGAY: payload.ngay || today(),
+        boPhanBaoCao: session.boPhan,
+        BO_PHAN_BAO_CAO: session.boPhan,
+        toTruong: session.tenToTruong,
+        TO_TRUONG: session.tenToTruong,
+        chiTiet: title,
+        CHI_TIET: title,
+        loaiBaoCao: module.loai,
+        LOAI_BAO_CAO: module.loai,
+        batDau: payload.batDau || x.batDau || '',
+        BAT_DAU: payload.batDau || x.batDau || '',
+        ketThuc: payload.ketThuc || x.ketThuc || '',
+        KET_THUC: payload.ketThuc || x.ketThuc || '',
+        soGio: payload.soGio || x.soGio || '',
+        SO_GIO: payload.soGio || x.soGio || '',
+        trangThai: x.trangThai || payload.trangThai || 'Đã chọn',
+        TRANG_THAI: x.trangThai || payload.trangThai || 'Đã chọn',
+      }))
+      writeJson(key, { rows: [...cleanOld, ...nextRows], cachedAt: Date.now(), localFirstAt: Date.now(), ngay: payload.ngay || today(), boPhan: session.boPhan, loaiBaoCao: module.loai })
+      window.dispatchEvent(new CustomEvent('erp-local-detail-updated', { detail: { moduleId: module.id, boPhan: session.boPhan, title, rows: nextRows } }))
+    })
+  } catch (e) {
+    console.warn('updateLocalDetailCacheFromNhapLieu failed', e)
+  }
+}
+function patchCompanyReportAfterNhapLieu(session, type, title, payload) {
+  try {
+    const local = findCompanyReportCache(today())
+    const report = local?.data
+    if (!report || !Array.isArray(report.rows)) return
+    const count = (payload.items || []).length
+    const next = { ...report, rows: report.rows.map(r => ({ ...r })) }
+    const deptName = session.boPhan
+    let row = next.rows.find(r => sameText(r.boPhan, deptName))
+    if (!row) {
+      row = { boPhan: deptName, toTruong: session.tenToTruong, tongCongNhan: (payload.items || []).length, coMat: 0, vangBuoiSang: 0, vangBuoiChieu: 0, vangCaNgay: 0 }
+      next.rows.push(row)
+    }
+    if (type === 'Vắng mặt') {
+      if (sameText(title, 'Vắng buổi sáng')) row.vangBuoiSang = count
+      if (sameText(title, 'Vắng buổi chiều')) row.vangBuoiChieu = count
+      if (sameText(title, 'Vắng cả ngày')) row.vangCaNgay = count
+      const tong = Number(row.tongCongNhan || 0)
+      row.coMat = Math.max(0, tong - Number(row.vangBuoiSang || 0) - Number(row.vangBuoiChieu || 0) - Number(row.vangCaNgay || 0))
+      next.vangSang = next.rows.reduce((s, x) => s + Number(x.vangBuoiSang || 0), 0)
+      next.vangChieu = next.rows.reduce((s, x) => s + Number(x.vangBuoiChieu || 0), 0)
+      next.vangCaNgay = next.rows.reduce((s, x) => s + Number(x.vangCaNgay || 0), 0)
+      next.coMat = next.rows.reduce((s, x) => s + Number(x.coMat || 0), 0)
+      next.tongCN = next.rows.reduce((s, x) => s + Number(x.tongCongNhan || 0), 0)
+    }
+    saveCompanyReportCache(next, today(), session.boPhan)
+    window.dispatchEvent(new CustomEvent('erp-company-report-updated', { detail: next }))
+  } catch (e) {
+    console.warn('patchCompanyReportAfterNhapLieu failed', e)
+  }
+}
 function saveLocalNhapLieu(session, type, title, payload) {
   const loai = payload.loaiBaoCao || loaiForType(type)
   const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {}, cache: readJson(CACHE_KEY, null) || {} }
@@ -249,6 +327,8 @@ function saveLocalNhapLieu(session, type, title, payload) {
   setPreloadedToday(session.boPhan, old)
   applyPreloadToCache(session.boPhan, old)
   writeJson(localKey('nhaplieu', [today(), session.boPhan, type, title]), payload)
+  updateLocalDetailCacheFromNhapLieu(session, type, title, payload)
+  patchCompanyReportAfterNhapLieu(session, type, title, payload)
 }
 
 function saveLocalBaoCaoTong(session, payload) {
@@ -677,7 +757,25 @@ function DeptDetailModal({ module, dept, onClose }) {
   useEffect(() => {
     window.__ERP_DEPT_DETAIL_ACTIVE__ = true
     let alive = true
-    const localRows = getLocalDetailRows(module, dept)
+    const refreshLocalDetail = () => {
+      const freshRows = getLocalDetailRows(module, dept)
+      if (!freshRows.length) return false
+      const freshBundles = rowsToBundles(module, dept, freshRows)
+      setBundles(freshBundles)
+      const first = module.titles.find(t => (freshBundles[t]?.items || []).length > 0)
+      if (first) setActive(first)
+      setMsg('⚡ Dữ liệu lấy từ máy. Đang đồng bộ nền...')
+      setLoading(false)
+      return true
+    }
+    const onLocalDetail = (event) => {
+      const d = event?.detail || {}
+      if (d.boPhan && !sameText(d.boPhan, dept.boPhan)) return
+      if (d.moduleId && d.moduleId !== module.id && !(module.id === 'tonghop' && d.moduleId === 'vang')) return
+      refreshLocalDetail()
+    }
+    window.addEventListener('erp-local-detail-updated', onLocalDetail)
+    let localRows = getLocalDetailRows(module, dept)
     if (localRows.length) {
       const localBundles = rowsToBundles(module, dept, localRows)
       setBundles(localBundles)
@@ -697,6 +795,15 @@ function DeptDetailModal({ module, dept, onClose }) {
         setMsg('Đang dùng dữ liệu lưu trên máy.')
         return
       }
+      const newestLocalRows = getLocalDetailRows(module, dept)
+      if (newestLocalRows.length && (!rows.length || newestLocalRows.length >= rows.length)) {
+        const newest = rowsToBundles(module, dept, newestLocalRows)
+        setBundles(newest)
+        const firstLocal = module.titles.find(t => (newest[t]?.items || []).length > 0)
+        if (firstLocal) setActive(firstLocal)
+        setMsg('Đang dùng dữ liệu lưu trên máy. Đồng bộ nền sẽ cập nhật sau.')
+        return
+      }
       const next = rowsToBundles(module, dept, rows)
       setBundles(next)
       const first = module.titles.find(t => (next[t]?.items || []).length > 0)
@@ -706,7 +813,7 @@ function DeptDetailModal({ module, dept, onClose }) {
       if (!alive) return
       setMsg(localRows.length ? 'Đang dùng dữ liệu lưu trên máy.' : (e?.message || 'Chưa lấy được dữ liệu chi tiết.'))
     }).finally(() => alive && setLoading(false))
-    return () => { alive = false; window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
+    return () => { alive = false; window.removeEventListener('erp-local-detail-updated', onLocalDetail); window.__ERP_DEPT_DETAIL_ACTIVE__ = false }
   }, [module.id, dept.boPhan])
   const titleRows = (title) => {
     const raw = bundles?.[title]
@@ -1052,6 +1159,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       setMsg('Vui lòng chọn tổ chuyển đến trước khi lưu.')
       return
     }
+    setSaving(true)
     const loaiBaoCao = type === 'Vắng mặt' ? 'Báo cáo vắng' : type === 'Biến động' ? 'Biến động nhân sự' : type
     const items = selectedRows.map(x => ({
       maNv: x.maNv,
