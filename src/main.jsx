@@ -274,8 +274,10 @@ function updateLocalDetailCacheFromNhapLieu(session, type, title, payload) {
         trangThai: x.trangThai || payload.trangThai || 'Đã chọn',
         TRANG_THAI: x.trangThai || payload.trangThai || 'Đã chọn',
       }))
-      writeJson(key, { rows: [...cleanOld, ...nextRows], cachedAt: Date.now(), localFirstAt: Date.now(), ngay: payload.ngay || today(), boPhan: session.boPhan, loaiBaoCao: module.loai })
-      window.dispatchEvent(new CustomEvent('erp-local-detail-updated', { detail: { moduleId: module.id, boPhan: session.boPhan, title, rows: nextRows } }))
+      const localDetailPack = { rows: [...cleanOld, ...nextRows], cachedAt: Date.now(), localFirstAt: Date.now(), ngay: payload.ngay || today(), boPhan: session.boPhan, loaiBaoCao: module.loai }
+      writeJson(key, localDetailPack)
+      writeJson(immediateDetailKey(module, dept, title), { rows: nextRows, cachedAt: Date.now(), localFirstAt: Date.now(), ngay: payload.ngay || today(), boPhan: session.boPhan, loaiBaoCao: module.loai, title })
+      window.dispatchEvent(new CustomEvent('erp-local-detail-updated', { detail: { moduleId: module.id, boPhan: session.boPhan, title, rows: nextRows, localFirstAt: Date.now() } }))
     })
   } catch (e) {
     console.warn('updateLocalDetailCacheFromNhapLieu failed', e)
@@ -649,7 +651,8 @@ function detailValue(row, keys, fallback = '') {
   return fallback
 }
 function sameText(a, b) { return stripVietnamese(a || '') === stripVietnamese(b || '') }
-function detailCacheKey(module, dept) { return localKey('bao_cao_chi_tiet_v43', [today(), dept?.boPhan || '', module?.loai || '']) }
+function detailCacheKey(module, dept) { return localKey('bao_cao_chi_tiet_v46', [today(), stripVietnamese(dept?.boPhan || ''), stripVietnamese(module?.loai || '')]) }
+function immediateDetailKey(module, dept, title) { return localKey('bao_cao_chi_tiet_immediate_v46', [today(), stripVietnamese(dept?.boPhan || ''), stripVietnamese(module?.loai || ''), stripVietnamese(title || '')]) }
 function normalizeDetailSheetRow(row, dept, fallbackTitle = '') {
   const boPhan = detailValue(row, ['boPhanBaoCao', 'BO_PHAN_BAO_CAO', 'boPhan', 'BO_PHAN', 'boPhanGoc', 'BO_PHAN_GOC'], dept?.boPhan || '')
   return {
@@ -673,6 +676,8 @@ function getLocalDetailRows(module, dept) {
   if (Array.isArray(cached?.rows)) rows.push(...cached.rows)
   const pre = getPreloadedToday(dept?.boPhan)
   module.titles.forEach(title => {
+    const instant = readJson(immediateDetailKey(module, dept, title), null)
+    if (Array.isArray(instant?.rows)) rows.push(...instant.rows)
     const b = pre?.bundles?.[module.loai]?.[title]
     if (Array.isArray(b?.items)) rows.push(...b.items.map(x => ({ ...x, chiTiet: x.chiTiet || title, loaiBaoCao: x.loaiBaoCao || module.loai })))
     const k1 = readJson(localKey('nhaplieu', [today(), dept?.boPhan, module.loai, title]), null)
@@ -833,7 +838,6 @@ function DeptDetailModal({ module, dept, onClose }) {
     <div className="dept-info-card"><div className="dept-info-icon">👥</div><div className="dept-info-main"><div>Bộ phận: <b>{dept.boPhan}</b></div><span>Tổ trưởng: <b>{dept.toTruong || '-'}</b></span><span>Tổng số công nhân: <b className="text-green">{tong}</b></span><p><b className="text-green">Có mặt: {coMat}</b><i></i><b className="text-red">Vắng: {simpleAbsence ? vang : totalSelected}</b></p></div></div>
     {showTabs && <div className="dept-detail-tabs">{module.titles.map(t => <button key={t} className={active === t ? 'active' : ''} onClick={() => setActive(t)}>{t.replace('Tăng ca ', '')}<span>{titleRows(t).length}</span></button>)}</div>}
     <div className="dept-detail-list no-search">{loading ? <div className="dept-empty">Đang lấy dữ liệu chi tiết...</div> : rows.length ? <table className="dept-detail-table"><thead><tr>{simpleAbsence ? <><th>STT</th><th>Họ và tên</th><th>Lý do vắng (nếu có)</th></> : <><th>#</th><th>Mã NV</th><th>Họ và tên</th><th>{module.id === 'tangca' || module.id === 'ngayle' ? 'Bộ phận/Giờ' : 'Nội dung'}</th></>}</tr></thead><tbody>{rows.map((p, i) => <tr key={`${active}_${p.maNv}_${i}`}>{simpleAbsence ? <><td>{i + 1}</td><td>{p.tenNv}</td><td>{p.lyDo || p.trangThai || 'Có phép'}</td></> : <><td>{i + 1}</td><td>{p.maNv}</td><td>{p.tenNv}</td><td>{module.id === 'tangca' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 0} giờ` : module.id === 'ngayle' ? `${p.boPhanGoc || p.boPhan || dept.boPhan} · ${p.soGio || bundles?.[active]?.soGio || 8} giờ` : (p.trangThai || active)}</td></>}</tr>)}</tbody></table> : <div className="dept-empty">Chưa có dữ liệu chi tiết lưu trên máy cho mục này.</div>}</div>
-    <div className="dept-note">ⓘ Dữ liệu chi tiết được ưu tiên lấy từ máy, sau đó đồng bộ nền từ Google Sheet.</div>
     <div className="dept-detail-footer"><span>{msg}</span><button className="primary-button mini" onClick={onClose}>Đóng</button></div>
   </div></div>
 }

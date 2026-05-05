@@ -1924,3 +1924,50 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
   .company-tabs button{ font-size:14px; padding:0 10px; }
   .dept-info-main div{ font-size:17px; }
 }
+
+
+/* =========================
+   ERP V30.46 LOCAL-INSTANT DETAIL + DETAIL SCROLL
+   - Bỏ ghi chú xanh trong màn chi tiết theo yêu cầu.
+   - Danh sách chi tiết tự cuộn riêng khi có nhiều nhân viên.
+   - Giữ header / thông tin / tab / footer cố định.
+   ========================= */
+.dept-note {
+  display: none !important;
+}
+
+.dept-detail-modal {
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.dept-detail-modal .modal-head-green,
+.dept-detail-modal .dept-info-card,
+.dept-detail-modal .dept-detail-tabs,
+.dept-detail-modal .dept-detail-footer {
+  flex: 0 0 auto !important;
+}
+
+.dept-detail-modal .dept-detail-list {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+  touch-action: pan-y !important;
+  max-height: none !important;
+}
+
+.dept-detail-modal .dept-detail-footer {
+  min-height: 64px !important;
+}
+
+.dept-detail-modal .dept-detail-footer span {
+  font-size: 13px !important;
+  line-height: 1.25 !important;
+}
+
