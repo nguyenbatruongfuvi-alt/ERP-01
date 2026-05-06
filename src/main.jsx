@@ -7,14 +7,14 @@ const API_KEY = ''
 const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
 const CACHE_KEY = 'erp_v30_client_cache'
-const DRAFT_PREFIX = 'erp_v30_draft_v53'
-const LOCAL_SAVE_PREFIX = 'erp_v30_local_first_v53'
-const PRELOAD_PREFIX = 'erp_v30_today_preload_v53'
+const DRAFT_PREFIX = 'erp_v30_draft_v13'
+const LOCAL_SAVE_PREFIX = 'erp_v30_local_first_v27'
+const PRELOAD_PREFIX = 'erp_v30_today_preload_v28'
 const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.53_UNIFIED_STABLE'
+const ERP_CLIENT_VERSION = 'V30.52_UI48_DETAIL_PRELOAD'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -681,21 +681,6 @@ const companyModules = [
   { id: 'vang', label: 'Vắng mặt', loai: 'Báo cáo vắng', titles: ['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày'] },
   { id: 'ngayle', label: 'Làm ngày lễ', loai: 'Làm ngày lễ', titles: ['Đăng ký làm ngày lễ'] },
 ]
-
-const ENTRY_MODULE_CONFIG = {
-  'Tăng ca': { id: 'tangca', loai: 'Tăng ca', titles: ['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất'], defaultStatus: 'Tăng ca' },
-  'Biến động': { id: 'biendong', loai: 'Biến động nhân sự', titles: ['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác'], statusFromTitle: true },
-  'Vắng mặt': { id: 'vang', loai: 'Báo cáo vắng', titles: ['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày'], permissionStatus: true, defaultStatus: 'Có phép' },
-  'Làm ngày lễ': { id: 'ngayle', loai: 'Làm ngày lễ', titles: ['Đăng ký làm ngày lễ'], permissionStatus: true, defaultStatus: 'Có phép' },
-}
-function entryConfig(type) { return ENTRY_MODULE_CONFIG[type] || { id: moduleIdForEntryType(type), loai: loaiForType(type), titles: [], defaultStatus: '' } }
-function entryStatusFor(type, title, row = {}, extra = {}) {
-  const cfg = entryConfig(type)
-  if (type === 'Biến động' && title === 'Điều động sang tổ khác' && extra.transferTarget) return `Điều động sang ${extra.transferTarget} (hỗ trợ)`
-  if (cfg.permissionStatus) return row.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'
-  if (cfg.statusFromTitle) return title
-  return row.trangThai || cfg.defaultStatus || title || ''
-}
 function deptNumber(value) { return Number(value || 0) || 0 }
 function DeptStat({ icon, label, value, tone = '' }) {
   return <div className={`dept-stat ${tone}`}><span>{icon}</span><small>{label}</small><b>{value}</b></div>
@@ -1008,20 +993,15 @@ function useStaff(session, cache) {
 }
 function DataEntryScreen({ type, items, session, cache }) {
   const staff = useStaff(session, cache)
-  const config = entryConfig(type)
-  const loai = config.loai || loaiForType(type)
+  const loai = loaiForType(type)
   const preload = cache?.today?.boPhan === session.boPhan ? cache.today : getPreloadedToday(session.boPhan)
   const [counts, setCounts] = useState(() => preload?.counts?.[loai] || {})
   const [open, setOpen] = useState(null)
   useEffect(() => {
     const pre = getPreloadedToday(session.boPhan)
     if (pre?.counts?.[loai]) setCounts(pre.counts[loai])
-    // Tải trước toàn bộ chi tiết một lần theo bộ phận để mở modal không bị trắng.
-    preloadTodayData(session.boPhan).then(data => {
-      if (data?.counts?.[loai]) setCounts(data.counts[loai])
-    }).catch(() => {})
     api('getCountsByLoai', [today(), session.boPhan, loai]).then(setCounts).catch(() => {})
-  }, [type, session.boPhan, loai])
+  }, [type, session.boPhan])
   function refreshCounts() {
     const pre = getPreloadedToday(session.boPhan)
     if (pre?.counts?.[loai]) setCounts(pre.counts[loai])
@@ -1075,7 +1055,7 @@ function mergeBundleRows(bundle, staff, session, type, title) {
   if (!hasSavedBefore && localDraft && Array.isArray(localDraft.items)) {
     const draftMap = new Map(localDraft.items.map(x => [x.maNv, x]))
     base = base.map(p => ({ ...p, selected: draftMap.has(p.maNv), trangThai: draftMap.get(p.maNv)?.trangThai || p.trangThai }))
-    return { rows: base, batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
+    return { rows: base.slice().sort((a,b)=>(b.selected?1:0)-(a.selected?1:0)), batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
   }
 
   // Không tự động chọn sẵn nhân viên cho mục Tăng ca.
@@ -1109,7 +1089,6 @@ function sortPickRows(list, dept) {
 function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   const isTransfer = title === 'Điều động sang tổ khác'
   const isHoliday = type === 'Làm ngày lễ'
-  const config = entryConfig(type)
   const [rows, setRows] = useState([])
   const [msg, setMsg] = useState('')
   const [batDau, setBatDau] = useState('')
@@ -1158,7 +1137,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     if (localDraft && Array.isArray(localDraft.items)) {
       const map = new Map(localDraft.items.map(x => [x.maNv, x]))
       const draftRows = mergeBundleRows({ items: localDraft.items, batDau: localDraft.batDau, ketThuc: localDraft.ketThuc }, staff, session, type, title)
-      setRows(draftRows.rows.map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })))
+      setRows(sortPickRows(draftRows.rows.map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })), session.boPhan))
       if (type === 'Tăng ca') { setBatDau(localDraft.batDau || ''); setKetThuc(localDraft.ketThuc || '') }
       setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
       setLoading(false)
@@ -1168,8 +1147,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
       setLoading(false)
     } else {
-      setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false, trangThai: '' })))
-      setLoading(false)
+      setLoading(true)
     }
     api('getNhapLieuBundleV309', [today(), session.boPhan, loai, title])
       .then(bundle => {
@@ -1193,13 +1171,13 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
         const localDraft = readJson(draftKeyFor(session, type, title), null)
         if (localDraft && Array.isArray(localDraft.items)) {
           const map = new Map(localDraft.items.map(x => [x.maNv, x]))
-          setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })))
+          setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })), session.boPhan))
           setBatDau(localDraft.batDau || '')
           setKetThuc(localDraft.ketThuc || '')
           setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
           setMsg(e.offline ? 'Đang offline thật: dùng dữ liệu tạm trên máy.' : 'API lỗi: đang dùng dữ liệu tạm trên máy.')
         } else if (!preBundle) {
-          setRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })))
+          setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })), session.boPhan))
           setMsg(e.message || 'Không tải được dữ liệu.')
         }
       })
@@ -1251,10 +1229,10 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     return () => clearTimeout(timer)
   }, [kw, session.boPhan])
 
-  function defaultStatus() { return config.defaultStatus || (config.statusFromTitle ? title : '') }
+  function defaultStatus() { return type === 'Vắng mặt' ? 'Có phép' : 'Đã chọn' }
   function toggle(ma) {
     setRows(list => {
-      const next = list.map(x => x.maNv === ma ? { ...x, selected: !x.selected, trangThai: x.trangThai || defaultStatus() } : x)
+      const next = sortPickRows(list.map(x => x.maNv === ma ? { ...x, selected: !x.selected, trangThai: x.trangThai || defaultStatus() } : x), session.boPhan)
       writePickDraft(next)
       return next
     })
@@ -1270,7 +1248,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     const person = { ...normalizeRow(p), boPhanGoc: p.boPhanGoc || p.boPhan || '', outside: true, selected: true, trangThai: p.trangThai || defaultStatus() }
     setRows(list => {
       const exists = list.some(x => x.maNv === person.maNv)
-      const next = exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [...list, person]
+      const next = sortPickRows(exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [person, ...list], session.boPhan)
       writePickDraft(next)
       return next
     })
@@ -1292,7 +1270,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       maNv: x.maNv,
       tenNv: x.tenNv,
       boPhanGoc: x.boPhanGoc || x.boPhan || session.boPhan,
-      trangThai: entryStatusFor(type, title, x, { transferTarget: transferTarget.trim() }),
+      trangThai: type === 'Vắng mặt' ? (x.trangThai === 'Không phép' ? 'Không phép' : 'Có phép') : (isTransfer ? `Điều động sang ${transferTarget.trim()} (hỗ trợ)` : 'Đã chọn'),
       boPhanChuyenDen: isTransfer ? transferTarget.trim() : '',
       toChuyenDen: isTransfer ? transferTarget.trim() : '',
       hoTro: isTransfer ? true : false,
@@ -1305,7 +1283,6 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     const n = queueSave(action, [payload], { requestId, screen: type, title })
     clearJson(draftKeyFor(session, type, title))
     setSaving(false)
-    setRows(list => sortPickRows(list, session.boPhan))
     setMsg(`💾 ĐÃ LƯU TRÊN MÁY ${items.length} người. Đang đồng bộ nền (${n}).`)
     onSaved?.()
     if (navigator.onLine) syncQueue().then(() => {
@@ -1317,7 +1294,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
 
   const actionControls = (p) => <div className="row-actions-lite" onClick={e => e.stopPropagation()}>
     <button className={p.selected ? 'secondary-button mini selected-mini' : 'primary-button mini'} onClick={() => toggle(p.maNv)}>{p.selected ? 'Đã chọn' : 'Chọn'}</button>
-    {config.permissionStatus && <select className="mini status-mini" value={p.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => setStatus(p.maNv, e.target.value)}><option>Có phép</option><option>Không phép</option></select>}
+    {type === 'Vắng mặt' && <select className="mini status-mini" value={p.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => setStatus(p.maNv, e.target.value)}><option>Có phép</option><option>Không phép</option></select>}
   </div>
   const renderPerson = (p, prefix = '') => <div className={`pick-row-lite ${p.selected ? 'selected' : ''} ${(p.outside || !sameDeptRow(p, session.boPhan)) ? 'outside' : ''}`} key={`${prefix}${p.maNv}`} onClick={() => toggle(p.maNv)}>
     <div className="person-info-lite"><b>{p.tenNv}{(p.outside || !sameDeptRow(p, session.boPhan)) && !isTransfer ? ' (hỗ trợ)' : ''}</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}{(p.outside || !sameDeptRow(p, session.boPhan)) ? ' · ngoài tổ' : ''}{type === 'Tăng ca' && <> · Giờ TC: {batDau || '--:--'} → {ketThuc || '--:--'} = {soGio || '0'} giờ</>}</div></div>{actionControls(p)}</div>
@@ -1344,7 +1321,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
           <div className="person-info-lite"><b>{p.tenNv} (hỗ trợ)</b><div className="small-text">{p.maNv} · {p.boPhanGoc || p.boPhan}</div></div>
           <div className="row-actions-lite">
             <button className={current.selected ? 'secondary-button mini selected-mini' : 'primary-button mini'} onClick={() => current.selected ? toggle(p.maNv) : addExternal(p)}>{current.selected ? 'Đã chọn' : 'Chọn'}</button>
-            {config.permissionStatus && <select className="mini status-mini" value={current.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => { current.selected ? setStatus(p.maNv, e.target.value) : addExternal({ ...p, trangThai: e.target.value }) }}><option>Có phép</option><option>Không phép</option></select>}
+            {type === 'Vắng mặt' && <select className="mini status-mini" value={current.trangThai === 'Không phép' ? 'Không phép' : 'Có phép'} onChange={e => { current.selected ? setStatus(p.maNv, e.target.value) : addExternal({ ...p, trangThai: e.target.value }) }}><option>Có phép</option><option>Không phép</option></select>}
           </div>
         </div>
       }) : <div className="note-compact">Không thấy nhân viên phù hợp.</div>}</div>}
@@ -1532,7 +1509,7 @@ function PrintOvertimeScreen({ session, departments }) {
   function renderPreviewTable() {
     if (!rows.length) return null
     if (loaiBaoCao === 'Tăng ca') return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận</th><th>Loại tăng ca</th><th>Bắt đầu</th><th>Kết thúc</th><th>Số giờ</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET'], loaiTangCa)}</td><td>{cellValue(r, ['batDau','BAT_DAU'])}</td><td>{cellValue(r, ['ketThuc','KET_THUC'])}</td><td>{cellValue(r, ['soGio','SO_GIO'])}</td></tr>)}</tbody></table></div>
-    if (loaiBaoCao === 'Làm ngày lễ') return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận</th><th>Ngày</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['ngay','NGAY'])}</td><td>{cellValue(r, ['trangThai','TRANG_THAI'], 'Có phép')}</td><td>{cellValue(r, ['ghiChu','GHI_CHU'])}</td></tr>)}</tbody></table></div>
+    if (loaiBaoCao === 'Làm ngày lễ') return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận</th><th>Ngày</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['ngay','NGAY'])}</td><td>{cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn')}</td><td>{cellValue(r, ['ghiChu','GHI_CHU'])}</td></tr>)}</tbody></table></div>
     return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận gốc</th><th>Tổ chuyển đến</th><th>Ngày</th><th>Trạng thái</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN'])}</td><td>{cellValue(r, ['ngay','NGAY'])}</td><td>{cellValue(r, ['trangThai','TRANG_THAI'])}</td></tr>)}</tbody></table></div>
   }
 
