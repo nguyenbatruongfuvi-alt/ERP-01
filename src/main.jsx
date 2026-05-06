@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.52_UI48_DETAIL_PRELOAD'
+const ERP_CLIENT_VERSION = 'V30.54_INSTANT_LOCAL_REOPEN'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -330,6 +330,53 @@ function readLocalDetailBundle(boPhan, loai, title) {
     localKey('detail_bundle_v47', [today(), boPhan, loai, title]),
     localKey('detail_bundle_v47', [today(), cacheTextKey(boPhan), loai, title]),
   ], null)
+}
+
+function readSavedEntryBundle(session, type, title, cache) {
+  const loai = loaiForType(type)
+  const localDraft = readJson(draftKeyFor(session, type, title), null)
+  if (localDraft && Array.isArray(localDraft.items)) return localDraft
+  const localBundle = readLocalDetailBundle(session.boPhan, loai, title)
+  if (localBundle && Array.isArray(localBundle.items)) return localBundle
+  const freshPreload = getPreloadedToday(session.boPhan)
+  const freshBundle = freshPreload?.bundles?.[loai]?.[title]
+  if (freshBundle && Array.isArray(freshBundle.items)) return freshBundle
+  const cacheBundle = cache?.today?.boPhan === session.boPhan ? cache.today?.bundles?.[loai]?.[title] : null
+  if (cacheBundle && Array.isArray(cacheBundle.items)) return cacheBundle
+  return null
+}
+
+function updateCompanyCacheFromLocalEntry(session, type, title, payload) {
+  try {
+    const local = findCompanyReportCache(today())
+    if (!local?.data) return
+    const report = normalizeCompanyReport(local.data)
+    if (!report || !Array.isArray(report.rows)) return
+    const loai = payload.loaiBaoCao || loaiForType(type)
+    const count = Array.isArray(payload.items) ? payload.items.length : 0
+    let touched = false
+    const rows = report.rows.map(row => {
+      if (!sameText(row.boPhan || row.BO_PHAN || '', session.boPhan)) return row
+      touched = true
+      const next = { ...row }
+      if (loai === 'Báo cáo vắng') {
+        if (title === 'Vắng buổi sáng') next.vangBuoiSang = count
+        if (title === 'Vắng buổi chiều') next.vangBuoiChieu = count
+        if (title === 'Vắng cả ngày') next.vangCaNgay = count
+        next.vangTong = deptNumber(next.vangBuoiSang) + deptNumber(next.vangBuoiChieu) + deptNumber(next.vangCaNgay)
+      }
+      return next
+    })
+    if (!touched) return
+    const nextReport = { ...report, rows }
+    nextReport.vangSang = rows.reduce((s, r) => s + deptNumber(r.vangBuoiSang), 0)
+    nextReport.vangChieu = rows.reduce((s, r) => s + deptNumber(r.vangBuoiChieu), 0)
+    nextReport.vangCaNgay = rows.reduce((s, r) => s + deptNumber(r.vangCaNgay), 0)
+    nextReport.tongCN = rows.reduce((s, r) => s + deptNumber(r.tongCongNhan), 0)
+    nextReport.coMat = rows.reduce((s, r) => s + deptNumber(r.coMat), 0)
+    saveCompanyReportCache(nextReport, today(), session.boPhan)
+    window.dispatchEvent(new CustomEvent('erp-company-report-updated', { detail: nextReport, localOnly: true }))
+  } catch {}
 }
 
 // V30.50: khóa dữ liệu local vừa lưu để API/Google Sheet trả chậm không ghi đè ngược.
@@ -999,8 +1046,11 @@ function DataEntryScreen({ type, items, session, cache }) {
   const [open, setOpen] = useState(null)
   useEffect(() => {
     const pre = getPreloadedToday(session.boPhan)
-    if (pre?.counts?.[loai]) setCounts(pre.counts[loai])
-    api('getCountsByLoai', [today(), session.boPhan, loai]).then(setCounts).catch(() => {})
+    if (pre?.counts?.[loai]) setCounts({ ...pre.counts[loai] })
+    window.setTimeout(() => {
+      const freshLocal = getPreloadedToday(session.boPhan)?.counts?.[loai]
+      api('getCountsByLoai', [today(), session.boPhan, loai]).then(c => setCounts(freshLocal ? { ...freshLocal } : c)).catch(() => {})
+    }, 25000)
   }, [type, session.boPhan])
   function refreshCounts() {
     // V30.53 STABLE LIKE TANG CA SANG:
@@ -1123,20 +1173,16 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
   useEffect(() => {
     let alive = true
     const loai = loaiForType(type)
-    const pre = (cache?.today?.boPhan === session.boPhan ? cache.today : getPreloadedToday(session.boPhan))
-    const preBundle = pre?.bundles?.[loai]?.[title]
-    const localDraft = readJson(draftKeyFor(session, type, title), null)
-    if (localDraft && Array.isArray(localDraft.items)) {
-      const map = new Map(localDraft.items.map(x => [x.maNv, x]))
-      const draftRows = mergeBundleRows({ items: localDraft.items, batDau: localDraft.batDau, ketThuc: localDraft.ketThuc }, staff, session, type, title)
-      setRows(sortPickRows(draftRows.rows.map(p => ({ ...p, selected: map.has(p.maNv), trangThai: map.get(p.maNv)?.trangThai || p.trangThai })), session.boPhan))
-      if (type === 'Tăng ca') { setBatDau(localDraft.batDau || ''); setKetThuc(localDraft.ketThuc || '') }
-      setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
-      setLoading(false)
-    } else if (preBundle) {
-      const merged = mergeBundleRows(preBundle, staff, session, type, title)
+    const savedBundle = readSavedEntryBundle(session, type, title, cache)
+    if (savedBundle) {
+      const merged = mergeBundleRows(savedBundle, staff, session, type, title)
       setRows(sortPickRows(merged.rows, session.boPhan))
-      if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
+      if (type === 'Tăng ca') { setBatDau(savedBundle.batDau || merged.batDau || ''); setKetThuc(savedBundle.ketThuc || merged.ketThuc || '') }
+      setTransferTarget(savedBundle.toChuyenDen || savedBundle.boPhanChuyenDen || '')
+      if (isHoliday) {
+        if (savedBundle.tuNgay) setHolidayFrom(toInputDate(savedBundle.tuNgay))
+        if (savedBundle.denNgay) setHolidayTo(toInputDate(savedBundle.denNgay))
+      }
       setLoading(false)
     } else {
       // Mở modal phải thấy danh sách ngay, không chờ API.
@@ -1147,7 +1193,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       .then(bundle => {
         if (!alive) return
         const activeDraft = readJson(draftKeyFor(session, type, title), null)
-        if (activeDraft?.localDraftAt && activeDraft.localDraftAt >= (localDraft?.localDraftAt || 0)) return
+        if (activeDraft?.localDraftAt) return
         const currentLocalBundle = readLocalDetailBundle(session.boPhan, loai, title) || getPreloadedToday(session.boPhan)?.bundles?.[loai]?.[title]
         if (shouldKeepFreshLocalBundle(currentLocalBundle, bundle)) return
         const merged = mergeBundleRows(bundle, staff, session, type, title)
@@ -1170,7 +1216,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
           setKetThuc(localDraft.ketThuc || '')
           setTransferTarget(localDraft.toChuyenDen || localDraft.boPhanChuyenDen || '')
           setMsg(e.offline ? 'Đang offline thật: dùng dữ liệu tạm trên máy.' : 'API lỗi: đang dùng dữ liệu tạm trên máy.')
-        } else if (!preBundle) {
+        } else if (!readSavedEntryBundle(session, type, title, cache)) {
           setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false })), session.boPhan))
           setMsg(e.message || 'Không tải được dữ liệu.')
         }
@@ -1273,6 +1319,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     const payload = { requestId, localDraftAt: Date.now(), ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, chiTiet: title, items, batDau, ketThuc, soGio, loaiBaoCao, tuNgay: isHoliday ? fromInputDate(holidayFrom) : '', denNgay: isHoliday ? fromInputDate(holidayTo) : '', boPhanChuyenDen: isTransfer ? transferTarget.trim() : '', toChuyenDen: isTransfer ? transferTarget.trim() : '', ghiChu: isTransfer ? `Điều động sang ${transferTarget.trim()} - hiển thị tại tổ nhận là (hỗ trợ)` : (isHoliday ? `Đăng ký làm ngày lễ từ ${fromInputDate(holidayFrom)} đến ${fromInputDate(holidayTo)}` : '') }
     writeJson(draftKeyFor(session, type, title), payload)
     saveLocalNhapLieu(session, type, title, payload)
+    updateCompanyCacheFromLocalEntry(session, type, title, payload)
     const action = type === 'Vắng mặt' ? 'saveChiTietVang' : 'saveNhapLieu'
     const n = queueSave(action, [payload], { requestId, screen: type, title })
     clearJson(draftKeyFor(session, type, title))
