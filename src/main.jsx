@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.58_COMPANY_MODULES_FIX'
+const ERP_CLIENT_VERSION = 'V30.59_TANG_CA_THANG_EXCEL'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -1714,8 +1714,8 @@ function PrintOvertimeScreen({ session, departments }) {
         }
       }
       data = (data || []).filter(row => {
-        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI'], '')
-        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], '')
+        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI','Loại báo cáo'], '')
+        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa','Loại tăng ca','Chi tiết'], '')
         if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || String(ct).startsWith('Vắng')
         if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự') && !sameText(ct, 'Điều động sang tổ khác')
         if (loaiBaoCao === 'Chuyển bộ phận') return sameText(ct, 'Điều động sang tổ khác')
@@ -1726,23 +1726,132 @@ function PrintOvertimeScreen({ session, departments }) {
       setRows(data)
       writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
 
-      const filename = `${safeFileName(reportTitle())}_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
+      const monthFromDate = (value) => {
+        const s = String(value || '').trim()
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+          const [, mm, yy] = s.split('/')
+          return `${mm}/${yy}`
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+          const [yy, mm] = s.split('-')
+          return `${mm}/${yy}`
+        }
+        return monthNow()
+      }
+      const dayFromDate = (value) => {
+        const s = String(value || '').trim()
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return Number(s.split('/')[0]) || 0
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return Number(s.split('-')[2]) || 0
+        return 0
+      }
+      const toNumber = (value) => {
+        const n = Number(String(value ?? '').replace(',', '.'))
+        return Number.isFinite(n) ? n : 0
+      }
+      const employeeInfo = (r) => {
+        const ngay = cellValue(r, ['ngay','NGAY','Ngày'], '')
+        const thang = monthFromDate(ngay || fromInputDate(tuNgay))
+        const maNv = cellValue(r, ['maNv','ma','MA_NV','Mã NV','Ma NV'], '')
+        const tenNv = cellValue(r, ['tenNv','ten','hoTen','TEN_NV','Tên NV','Ten NV','Họ và tên'], '')
+        const boPhan = cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC','BO_PHAN_BAO_CAO','Bộ phận','Bộ phận gốc'], bp === 'Tất cả' ? '' : bp)
+        return { ngay, thang, maNv, tenNv, boPhan, key: `${thang}__${boPhan}__${maNv || tenNv}` }
+      }
+      const sortByEmployee = (a, b) => String(a.boPhan).localeCompare(String(b.boPhan), 'vi') || String(a.maNv).localeCompare(String(b.maNv), 'vi') || String(a.tenNv).localeCompare(String(b.tenNv), 'vi')
+      const daysHeaders = Array.from({ length: 31 }, (_, i) => String(i + 1))
+
+      let filename = `${safeFileName(reportTitle())}_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
       let headers, body
+
       if (loaiBaoCao === 'Tăng ca') {
-        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại tăng ca','Bắt đầu','Kết thúc','Số giờ']
-        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET'], loaiTangCa), cellValue(r, ['batDau','BAT_DAU']), cellValue(r, ['ketThuc','KET_THUC']), cellValue(r, ['soGio','SO_GIO'])])
+        const grouped = new Map()
+        ;(data || []).forEach(r => {
+          const info = employeeInfo(r)
+          const day = dayFromDate(info.ngay)
+          if (!day || day < 1 || day > 31) return
+          if (!grouped.has(info.key)) grouped.set(info.key, { ...info, days: Array(31).fill(0) })
+          grouped.get(info.key).days[day - 1] += toNumber(cellValue(r, ['soGio','SO_GIO','Số giờ'], 0))
+        })
+        const exportRows = Array.from(grouped.values()).sort(sortByEmployee)
+        headers = ['THANG','BO_PHAN','MA_NV','TEN_NV', ...daysHeaders, 'TONG_GIO']
+        body = exportRows.map(row => {
+          const total = row.days.reduce((s, n) => s + n, 0)
+          const days = row.days.map(n => n ? Number(n.toFixed(2)) : '')
+          return [row.thang, row.boPhan, row.maNv, row.tenNv, ...days, Number(total.toFixed(2))]
+        })
+        filename = `TANG_CA_THANG_${safeFileName(bp)}_${safeFileName(monthFromDate(fromInputDate(tuNgay)))}.xls`
       } else if (loaiBaoCao === 'Vắng mặt') {
-        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Buổi vắng','Trạng thái','Ghi chú']
-        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Vắng mặt'), cellValue(r, ['trangThai','TRANG_THAI'], 'Có phép'), cellValue(r, ['ghiChu','GHI_CHU'])])
-      } else if (loaiBaoCao === 'Biến động') {
-        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại biến động','Trạng thái','Ghi chú']
-        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Biến động'), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
+        const absenceValue = (r) => {
+          const ct = stripVietnamese(cellValue(r, ['chiTiet','CHI_TIET','Chi tiết'], ''))
+          const st = cellValue(r, ['trangThai','TRANG_THAI','Trạng thái'], '') || 'Có phép'
+          if (ct.includes('buoi sang')) return `Sáng-${st}`
+          if (ct.includes('buoi chieu')) return `Chiều-${st}`
+          if (ct.includes('ca ngay')) return `Cả ngày-${st}`
+          return st || 'Vắng'
+        }
+        const absencePoint = (r) => {
+          const ct = stripVietnamese(cellValue(r, ['chiTiet','CHI_TIET','Chi tiết'], ''))
+          if (ct.includes('buoi sang') || ct.includes('buoi chieu')) return 0.5
+          return 1
+        }
+        const grouped = new Map()
+        ;(data || []).forEach(r => {
+          const info = employeeInfo(r)
+          const day = dayFromDate(info.ngay)
+          if (!day || day < 1 || day > 31) return
+          if (!grouped.has(info.key)) grouped.set(info.key, { ...info, days: Array(31).fill(''), total: 0 })
+          const g = grouped.get(info.key)
+          const val = absenceValue(r)
+          g.days[day - 1] = g.days[day - 1] ? `${g.days[day - 1]}; ${val}` : val
+          g.total += absencePoint(r)
+        })
+        const exportRows = Array.from(grouped.values()).sort(sortByEmployee)
+        headers = ['THANG','BO_PHAN','MA_NV','TEN_NV', ...daysHeaders, 'TONG_NGAY_VANG']
+        body = exportRows.map(row => [row.thang, row.boPhan, row.maNv, row.tenNv, ...row.days, Number(row.total.toFixed(2))])
+        filename = `VANG_MAT_THANG_${safeFileName(bp)}_${safeFileName(monthFromDate(fromInputDate(tuNgay)))}.xls`
       } else if (loaiBaoCao === 'Làm ngày lễ') {
-        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Trạng thái','Ghi chú']
-        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
+        const grouped = new Map()
+        ;(data || []).forEach(r => {
+          const info = employeeInfo(r)
+          const day = dayFromDate(info.ngay)
+          if (!day || day < 1 || day > 31) return
+          if (!grouped.has(info.key)) grouped.set(info.key, { ...info, days: Array(31).fill(''), total: 0 })
+          const g = grouped.get(info.key)
+          const gio = toNumber(cellValue(r, ['soGio','SO_GIO','Số giờ'], 0))
+          g.days[day - 1] = gio ? gio : 'X'
+          g.total += gio || 1
+        })
+        const exportRows = Array.from(grouped.values()).sort(sortByEmployee)
+        headers = ['THANG','BO_PHAN','MA_NV','TEN_NV', ...daysHeaders, 'TONG_CONG_LE']
+        body = exportRows.map(row => [row.thang, row.boPhan, row.maNv, row.tenNv, ...row.days, Number(row.total.toFixed(2))])
+        filename = `LAM_NGAY_LE_THANG_${safeFileName(bp)}_${safeFileName(monthFromDate(fromInputDate(tuNgay)))}.xls`
+      } else if (loaiBaoCao === 'Biến động') {
+        headers = ['STT','NGAY','BO_PHAN','MA_NV','TEN_NV','LOAI_BIEN_DONG','TRANG_THAI','LY_DO','GHI_CHU']
+        body = data.map((r, i) => [
+          i + 1,
+          cellValue(r, ['ngay','NGAY','Ngày']),
+          cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC','BO_PHAN_BAO_CAO','Bộ phận'], bp),
+          cellValue(r, ['maNv','ma','MA_NV','Mã NV']),
+          cellValue(r, ['tenNv','ten','hoTen','TEN_NV','Tên NV','Họ và tên']),
+          cellValue(r, ['chiTiet','CHI_TIET','Chi tiết'], 'Biến động'),
+          cellValue(r, ['trangThai','TRANG_THAI','Trạng thái'], 'Đã chọn'),
+          cellValue(r, ['lyDo','LY_DO','Lý do'], ''),
+          cellValue(r, ['ghiChu','GHI_CHU','Ghi chú'], ''),
+        ])
+        filename = `BIEN_DONG_NHAN_SU_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
       } else {
-        headers = ['STT','Mã NV','Họ và tên','Bộ phận gốc','Tổ chuyển đến','Ngày','Trạng thái']
-        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN']), cellValue(r, ['ngay','NGAY']), cellValue(r, ['trangThai','TRANG_THAI'])])
+        headers = ['STT','NGAY','MA_NV','TEN_NV','BO_PHAN_GOC','TO_CHUYEN_DEN','TRANG_THAI','LY_DO','GHI_CHU']
+        body = data.map((r, i) => [
+          i + 1,
+          cellValue(r, ['ngay','NGAY','Ngày']),
+          cellValue(r, ['maNv','ma','MA_NV','Mã NV']),
+          cellValue(r, ['tenNv','ten','hoTen','TEN_NV','Tên NV','Họ và tên']),
+          cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC','Bộ phận gốc'], bp),
+          cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN','Tổ chuyển đến'], ''),
+          cellValue(r, ['trangThai','TRANG_THAI','Trạng thái'], ''),
+          cellValue(r, ['lyDo','LY_DO','Lý do'], ''),
+          cellValue(r, ['ghiChu','GHI_CHU','Ghi chú'], ''),
+        ])
+        filename = `CHUYEN_BO_PHAN_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
       }
       downloadHtmlExcel(filename, reportTitle(), headers, body)
       setFileUrl('')
