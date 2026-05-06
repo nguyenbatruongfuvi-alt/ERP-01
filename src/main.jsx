@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 
-const API_URL = 'https://script.google.com/macros/s/AKfycby0VCyaEdk0BGqFVflht1sGPdgH8uNgHcga1QXzEldTyMQGyqyTnjw_84z01puO6YrqvA/exec'
+const API_URL = 'https://script.google.com/macros/s/AKfycbxnxJRgtEyK6f92to3d2HTY5Cp7d7pZY5H4RfFM4KpmSQsf8uBDGArlN3b4uNn5lNei5w/exec'
 const API_KEY = ''
 const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
@@ -1003,14 +1003,22 @@ function DataEntryScreen({ type, items, session, cache }) {
     api('getCountsByLoai', [today(), session.boPhan, loai]).then(setCounts).catch(() => {})
   }, [type, session.boPhan])
   function refreshCounts() {
+    // V30.53 STABLE LIKE TANG CA SANG:
+    // Sau khi lưu, chỉ lấy số từ local/preload vừa ghi. Không gọi API ngay,
+    // vì Google Sheet thường trả dữ liệu cũ trong vài giây và làm màn ngoài không cập nhật hoặc bị mất dữ liệu khi quay lại.
     const pre = getPreloadedToday(session.boPhan)
-    if (pre?.counts?.[loai]) setCounts(pre.counts[loai])
-    api('getCountsByLoai', [today(), session.boPhan, loai]).then(c => {
-      setCounts(c)
-      const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {} }
-      old.counts = { ...(old.counts || {}), [loai]: c }
-      setPreloadedToday(session.boPhan, old)
-    }).catch(() => {})
+    if (pre?.counts?.[loai]) setCounts({ ...pre.counts[loai] })
+    if (navigator.onLine) {
+      window.setTimeout(() => {
+        api('getCountsByLoai', [today(), session.boPhan, loai]).then(c => {
+          const stillFresh = getPreloadedToday(session.boPhan)?.counts?.[loai]
+          setCounts(stillFresh ? { ...stillFresh } : c)
+          const old = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {} }
+          old.counts = { ...(old.counts || {}), [loai]: stillFresh || c }
+          setPreloadedToday(session.boPhan, old)
+        }).catch(() => {})
+      }, 25000)
+    }
   }
   return <><div className="card">{items.map(item => <div className="tile-card" key={item} onClick={() => setOpen(item)}><div className="tile-title">{item}</div><div className="tile-sub">SL: {counts[item] || 0} người</div></div>)}</div>{open && <PickModal title={open} type={type} staff={staff} session={session} cache={cache} onClose={() => setOpen(null)} onSaved={refreshCounts} />}</>
 }
@@ -1055,35 +1063,19 @@ function mergeBundleRows(bundle, staff, session, type, title) {
   if (!hasSavedBefore && localDraft && Array.isArray(localDraft.items)) {
     const draftMap = new Map(localDraft.items.map(x => [x.maNv, x]))
     base = base.map(p => ({ ...p, selected: draftMap.has(p.maNv), trangThai: draftMap.get(p.maNv)?.trangThai || p.trangThai }))
-    return { rows: base.slice().sort((a,b)=>(b.selected?1:0)-(a.selected?1:0)), batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
+    return { rows: base, batDau: localDraft.batDau || '', ketThuc: localDraft.ketThuc || '', soGio: localDraft.soGio || '', hasSavedBefore: true }
   }
 
-  // Không tự động chọn sẵn nhân viên cho mục Tăng ca.
+  // V30.53: giữ nguyên thứ tự danh sách như Tăng ca sáng ổn định.
+  // Không đưa người đã chọn lên đầu, vì khi bấm chọn sẽ làm nhân viên tự nhảy vị trí.
   const first = saved.find(x => x.batDau || x.ketThuc || x.soGio) || saved[0] || {}
-  // Luôn đưa người đã lưu/đã chọn lên đầu để mở lại nhìn thấy ngay.
-  const selectedOrder = new Set(saved.filter(x => x.selected !== false).map(x => x.maNv))
-  base = base.slice().sort((a, b) => {
-    const as = a.selected ? 1 : 0
-    const bs = b.selected ? 1 : 0
-    if (bs !== as) return bs - as
-    const ao = selectedOrder.has(a.maNv) ? 1 : 0
-    const bo = selectedOrder.has(b.maNv) ? 1 : 0
-    if (bo !== ao) return bo - ao
-    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
-  })
   return { rows: base, batDau: first.batDau || '', ketThuc: first.ketThuc || '', soGio: first.soGio || '', hasSavedBefore }
 }
 function sameDeptRow(p, dept) { return stripVietnamese(p?.boPhanGoc || p?.boPhan) === stripVietnamese(dept) }
 function sortPickRows(list, dept) {
-  return (list || []).slice().sort((a, b) => {
-    const as = a.selected ? 1 : 0
-    const bs = b.selected ? 1 : 0
-    if (bs !== as) return bs - as
-    const ao = (a.outside || !sameDeptRow(a, dept)) ? 1 : 0
-    const bo = (b.outside || !sameDeptRow(b, dept)) ? 1 : 0
-    if (ao !== bo) return ao - bo
-    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
-  })
+  // V30.53: tên hàm giữ nguyên để không đổi cấu trúc code, nhưng không sort nữa.
+  // Mục tiêu: chọn/bỏ chọn nhân viên thì dòng đứng yên một chỗ như Tăng ca sáng ổn định.
+  return (list || []).slice()
 }
 
 function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
@@ -1147,6 +1139,8 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
       if (type === 'Tăng ca') { setBatDau(merged.batDau || ''); setKetThuc(merged.ketThuc || '') }
       setLoading(false)
     } else {
+      // Mở modal phải thấy danh sách ngay, không chờ API.
+      setRows(sortPickRows((staff || []).map(normalizeRow).map(p => ({ ...p, selected: false, boPhanGoc: p.boPhanGoc || p.boPhan || session.boPhan })), session.boPhan))
       setLoading(true)
     }
     api('getNhapLieuBundleV309', [today(), session.boPhan, loai, title])
@@ -1248,7 +1242,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     const person = { ...normalizeRow(p), boPhanGoc: p.boPhanGoc || p.boPhan || '', outside: true, selected: true, trangThai: p.trangThai || defaultStatus() }
     setRows(list => {
       const exists = list.some(x => x.maNv === person.maNv)
-      const next = sortPickRows(exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [person, ...list], session.boPhan)
+      const next = sortPickRows(exists ? list.map(x => x.maNv === person.maNv ? { ...x, ...person, selected: true } : x) : [...list, person], session.boPhan)
       writePickDraft(next)
       return next
     })
