@@ -5,17 +5,30 @@ import './styles.css'
 const API_URL = 'https://script.google.com/macros/s/AKfycbxnxJRgtEyK6f92to3d2HTY5Cp7d7pZY5H4RfFM4KpmSQsf8uBDGArlN3b4uNn5lNei5w/exec'
 const API_KEY = ''
 const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
-const SESSION_KEY = 'erp_v30_session'
-const CACHE_KEY = 'erp_v30_53_client_cache'
-const DRAFT_PREFIX = 'erp_v30_53_draft_v1'
-const LOCAL_SAVE_PREFIX = 'erp_v30_53_local_first_v1'
-const PRELOAD_PREFIX = 'erp_v30_53_today_preload_v1'
-const LAST_DEPT_KEY = 'erp_v30_last_department'
-const BOOT_KEY = 'erp_v30_53_boot_init_v1'
+const SESSION_KEY = 'erp_v55_session'
+const CACHE_KEY = 'erp_v55_client_cache'
+const DRAFT_PREFIX = 'erp_v55_draft_v1'
+const LOCAL_SAVE_PREFIX = 'erp_v55_local_first_v1'
+const PRELOAD_PREFIX = 'erp_v55_today_preload_v1'
+const LAST_DEPT_KEY = 'erp_v55_last_department'
+const BOOT_KEY = 'erp_v55_boot_init_v1'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.53_VERCEL_FIXED_API_CACHE'
+const ERP_CLIENT_VERSION = 'V30.55_STAFF_SYNC_CACHE_FIX'
 let SYNC_QUEUE_RUNNING = false
+// V30.55: chặn pull-to-refresh trên mobile để không mất dữ liệu khi đang nhập.
+if (typeof window !== 'undefined') {
+  let erpTouchStartY = 0
+  window.addEventListener('touchstart', (e) => { erpTouchStartY = e.touches?.[0]?.clientY || 0 }, { passive: true })
+  window.addEventListener('touchmove', (e) => {
+    const y = e.touches?.[0]?.clientY || 0
+    const target = e.target
+    const modal = target?.closest?.('.modal-panel, .table-scroll, .page')
+    const scroller = modal || document.scrollingElement || document.documentElement
+    if (window.scrollY <= 0 && scroller.scrollTop <= 0 && y > erpTouchStartY) e.preventDefault()
+  }, { passive: false })
+}
+
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
 window.__ERP_DEPT_DETAIL_ACTIVE__ = false
@@ -142,17 +155,8 @@ function setPreloadedToday(boPhan, data) { if (boPhan && data) writeJson(preload
 function isFreshPreload(data) { return !!(data && data.ngay === today() && Date.now() - Number(data.cachedAt || 0) < PRELOAD_TTL_MS) }
 function applyPreloadToCache(boPhan, data) {
   if (!data) return null
-  const oldCache = readJson(CACHE_KEY, null) || {}
-  const srcCache = data.cache || data || {}
-  const merged = {
-    ...oldCache,
-    ...srcCache,
-    today: data,
-    boPhanList: srcCache.boPhanList || oldCache.boPhanList || [],
-    nhanSuAll: srcCache.nhanSuAll || oldCache.nhanSuAll || [],
-    nhanSuBoPhan: srcCache.nhanSuBoPhan || oldCache.nhanSuBoPhan || [],
-    loadedAt: data.loadedAt || srcCache.loadedAt || new Date().toISOString()
-  }
+  const cache = data.cache || readJson(CACHE_KEY, null) || {}
+  const merged = { ...cache, today: data, nhanSuBoPhan: data.cache?.nhanSuBoPhan || cache.nhanSuBoPhan || [] }
   writeJson(CACHE_KEY, merged)
   if (boPhan) writeJson(LAST_DEPT_KEY, boPhan)
   return merged
@@ -160,7 +164,7 @@ function applyPreloadToCache(boPhan, data) {
 async function refreshTodayData(boPhan) {
   if (!boPhan || !navigator.onLine) return getPreloadedToday(boPhan)
   try {
-    const data = await api('getTodayBootstrapV349', [boPhan, today()])
+    const data = await api('getTodayBootstrapV355', [boPhan, today()])
     setPreloadedToday(boPhan, data)
     applyPreloadToCache(boPhan, data)
     return data
@@ -553,7 +557,7 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
       setMsg('⏳ Đang tải sẵn dữ liệu bộ phận...')
     }
     setPreloading(!cached)
-    preloadTodayData(department, { force: true, background: false }).then(data => {
+    preloadTodayData(department).then(data => {
       if (!alive) return
       const merged = applyPreloadToCache(department, data)
       if (merged) setCache(merged)
@@ -602,9 +606,9 @@ function LoginScreen({ departments, setSession, setDepartments, setCache }) {
 
       if (!preload?.cache) {
         setMsg('⏳ Lần đầu đăng nhập: đang tải dữ liệu bộ phận về điện thoại...')
-        preload = await preloadTodayData(department, { background: false })
+        preload = await preloadTodayData(department, { background: false, force: true })
       } else {
-        preloadTodayData(department).catch(() => {})
+        preloadTodayData(department, { force: true }).catch(() => {})
       }
       const merged = applyPreloadToCache(department, preload)
       if (merged) setCache(merged)
@@ -659,7 +663,24 @@ function BootSplash({ text = 'Đang tải dữ liệu gốc...' }) {
 function ReportScreen({ session }) {
   const [data, setData] = useState(null), [form, setForm] = useState({ tongCongNhan: '', coMat: '', ghiChu: '' }), [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
-  useEffect(() => { const local = readJson(localKey('bao_cao_tong', [today(), session.boPhan]), null); if (local) { setForm({ tongCongNhan: local.tongCongNhan || '', coMat: local.coMat || '', ghiChu: local.ghiChu || '' }); setMsg('Đang hiển thị dữ liệu đã lưu trên máy.') } api('getBaoCaoTong', [today(), session.boPhan]).then(r => { setData(r); if (!local) setForm({ tongCongNhan: r.TONG_CONG_NHAN || '', coMat: r.CO_MAT || '', ghiChu: r.GHI_CHU || '' }) }).catch(e => { if (!local) setMsg(e.message) }) }, [session.boPhan])
+  useEffect(() => {
+    const local = readJson(localKey('bao_cao_tong', [today(), session.boPhan]), null)
+    if (local && !navigator.onLine) {
+      setForm({ tongCongNhan: local.tongCongNhan || '', coMat: local.coMat || '', ghiChu: local.ghiChu || '' })
+      setMsg('Đang hiển thị dữ liệu đã lưu trên máy.')
+    }
+    api('getBaoCaoTong', [today(), session.boPhan]).then(r => {
+      setData(r)
+      setForm({ tongCongNhan: r.TONG_CONG_NHAN || '', coMat: r.CO_MAT || '', ghiChu: r.GHI_CHU || '' })
+      writeJson(localKey('bao_cao_tong', [today(), session.boPhan]), { tongCongNhan: r.TONG_CONG_NHAN || '', coMat: r.CO_MAT || '', ghiChu: r.GHI_CHU || '', serverAt: Date.now() })
+      setMsg('Đang hiển thị dữ liệu mới từ bảng tính.')
+    }).catch(e => {
+      if (local) {
+        setForm({ tongCongNhan: local.tongCongNhan || '', coMat: local.coMat || '', ghiChu: local.ghiChu || '' })
+        setMsg('Đang hiển thị dữ liệu đã lưu trên máy.')
+      } else setMsg(e.message)
+    })
+  }, [session.boPhan])
   const rows = [['Tổng công nhân', form.tongCongNhan || 0, 'var(--color-blue)'], ['Có mặt', form.coMat || 0, 'var(--color-green)'], ['Vắng sáng', data?.VANG_BUOI_SANG || 0, 'var(--color-orange)'], ['Vắng chiều', data?.VANG_BUOI_CHIEU || 0, 'var(--color-orange)'], ['Vắng cả ngày', data?.VANG_CA_NGAY || 0, 'var(--color-red)']]
   async function save() {
     if (saving) return
@@ -987,17 +1008,38 @@ function useStaff(session, cache) {
   const preload = session?.boPhan ? getPreloadedToday(session.boPhan) : null
   const cachedStaff = cache?.nhanSuBoPhan || preload?.cache?.nhanSuBoPhan || []
   const [staff, setStaff] = useState(cachedStaff)
+
   useEffect(() => {
+    if (!session?.boPhan) return
+    let alive = true
     const rows = cache?.nhanSuBoPhan || getPreloadedToday(session.boPhan)?.cache?.nhanSuBoPhan || []
     if (rows.length) setStaff(rows)
-  }, [cache, session.boPhan])
+
+    // V30.55: nếu cache rỗng hoặc thiếu nhân sự, gọi trực tiếp getClientCache từ Apps Script mới.
+    if ((!rows || rows.length === 0) && navigator.onLine) {
+      api('getClientCache', [session.boPhan]).then(c => {
+        if (!alive) return
+        const nextRows = c?.nhanSuBoPhan || []
+        if (nextRows.length) {
+          setStaff(nextRows)
+          const oldPre = getPreloadedToday(session.boPhan) || { ngay: today(), boPhan: session.boPhan, counts: {}, bundles: {} }
+          oldPre.cache = { ...(oldPre.cache || {}), ...c }
+          setPreloadedToday(session.boPhan, oldPre)
+          writeJson(CACHE_KEY, { ...(readJson(CACHE_KEY, {}) || {}), ...c, boPhan: session.boPhan, today: oldPre })
+        }
+      }).catch(() => {})
+    }
+    return () => { alive = false }
+  }, [cache, session?.boPhan])
+
   useEffect(() => {
+    if (!session?.boPhan) return
     if ((cache?.nhanSuBoPhan || []).length) return
-    preloadTodayData(session.boPhan, { background: false }).then(data => {
+    preloadTodayData(session.boPhan, { background: false, force: true }).then(data => {
       const rows = data?.cache?.nhanSuBoPhan || []
       if (rows.length) setStaff(rows)
     }).catch(() => {})
-  }, [session.boPhan])
+  }, [session?.boPhan])
   return staff
 }
 function DataEntryScreen({ type, items, session, cache }) {
@@ -1069,30 +1111,13 @@ function mergeBundleRows(bundle, staff, session, type, title) {
 
   // Không tự động chọn sẵn nhân viên cho mục Tăng ca.
   const first = saved.find(x => x.batDau || x.ketThuc || x.soGio) || saved[0] || {}
-  // Luôn đưa người đã lưu/đã chọn lên đầu để mở lại nhìn thấy ngay.
-  const selectedOrder = new Set(saved.filter(x => x.selected !== false).map(x => x.maNv))
-  base = base.slice().sort((a, b) => {
-    const as = a.selected ? 1 : 0
-    const bs = b.selected ? 1 : 0
-    if (bs !== as) return bs - as
-    const ao = selectedOrder.has(a.maNv) ? 1 : 0
-    const bo = selectedOrder.has(b.maNv) ? 1 : 0
-    if (bo !== ao) return bo - ao
-    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
-  })
+  // V30.55: giữ nguyên thứ tự nhân sự từ sheet/cache, không đưa người đã chọn lên đầu.
   return { rows: base, batDau: first.batDau || '', ketThuc: first.ketThuc || '', soGio: first.soGio || '', hasSavedBefore }
 }
 function sameDeptRow(p, dept) { return stripVietnamese(p?.boPhanGoc || p?.boPhan) === stripVietnamese(dept) }
 function sortPickRows(list, dept) {
-  return (list || []).slice().sort((a, b) => {
-    const as = a.selected ? 1 : 0
-    const bs = b.selected ? 1 : 0
-    if (bs !== as) return bs - as
-    const ao = (a.outside || !sameDeptRow(a, dept)) ? 1 : 0
-    const bo = (b.outside || !sameDeptRow(b, dept)) ? 1 : 0
-    if (ao !== bo) return ao - bo
-    return String(a.maNv || '').localeCompare(String(b.maNv || ''), 'vi', { numeric: true })
-  })
+  // V30.55: không sort lại danh sách khi chọn để tránh nhân viên nhảy lên đầu.
+  return (list || []).slice()
 }
 
 function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
@@ -1233,7 +1258,7 @@ function PickModal({ title, type, staff, session, cache, onClose, onSaved }) {
     const q = kw.trim()
     if (!q || q.length < 2) { setRemoteResults([]); return }
     const timer = setTimeout(() => {
-      api('searchNhanSu', [session.boPhan, q]).then(list => setRemoteResults(list || [])).catch(() => {})
+      api('searchNhanSuV355', [session.boPhan, q]).then(list => setRemoteResults(list || [])).catch(() => {})
     }, 220)
     return () => clearTimeout(timer)
   }, [kw, session.boPhan])
@@ -1556,7 +1581,7 @@ function App() {
         writeJson(BOOT_KEY, init)
         setDepartments(init.boPhanList || fallbackDepartments)
       }).catch(() => {})
-      if (last) preloadTodayData(last, { force: true, background: false }).then(data => { if (alive) { const merged = applyPreloadToCache(last, data); if (merged) setCache(merged) } }).catch(() => {})
+      if (last) preloadTodayData(last).then(data => { if (alive) { const merged = applyPreloadToCache(last, data); if (merged) setCache(merged) } }).catch(() => {})
     }
     boot()
     return () => { alive = false }
@@ -1624,7 +1649,7 @@ if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (refreshing) return
         refreshing = true
-        window.location.reload()
+        /* V30.55: không tự reload vì có thể mất dữ liệu đang nhập */
       })
     } catch {}
   })

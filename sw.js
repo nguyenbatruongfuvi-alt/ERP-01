@@ -1,5 +1,4 @@
-// V30.54 fixed API/cache
-const CACHE_NAME = 'erp-v30-54-fixed-api-cache';
+const CACHE_NAME = 'erp-v30-ui-shell-v55-staff-cache-sync-fix';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {

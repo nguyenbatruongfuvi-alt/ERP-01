@@ -2259,3 +2259,13 @@ body { overflow-y:auto !important; overflow-x:hidden !important; -webkit-overflo
 .dept-detail-tabs button {
   scroll-snap-align: start !important;
 }
+
+
+/* V30.55: chặn kéo xuống làm mới trên điện thoại, không ảnh hưởng cuộn trong modal */
+html, body, #root {
+  overscroll-behavior-y: none;
+  overscroll-behavior-x: none;
+}
+.modal-panel, .page, .table-scroll {
+  overscroll-behavior: contain;
+}
