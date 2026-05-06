@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.56_REPORT_PRINT_FINAL'
+const ERP_CLIENT_VERSION = 'V30.57_REPORT_DEPT_PRINT_FIX'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -746,25 +746,62 @@ function BootSplash({ text = 'Đang tải dữ liệu gốc...' }) {
 
 function ReportScreen({ session }) {
   const readLocalSummary = () => readJson(localKey('bao_cao_tong', [today(), session.boPhan]), null)
+  const readLocalAbsenceCounts = () => {
+    const pre = getPreloadedToday(session.boPhan)
+    const v = pre?.counts?.['Báo cáo vắng'] || pre?.counts?.[loaiForType('Vắng mặt')] || {}
+    return {
+      sang: Number(v['Vắng buổi sáng'] || 0),
+      chieu: Number(v['Vắng buổi chiều'] || 0),
+      caNgay: Number(v['Vắng cả ngày'] || 0),
+    }
+  }
   const applyLocalSummary = (local) => {
     if (!local) return false
+    const c = readLocalAbsenceCounts()
     setForm({ tongCongNhan: local.tongCongNhan || '', coMat: local.coMat || '', ghiChu: local.ghiChu || '' })
-    setData(d => ({ ...(d || {}), TONG_CONG_NHAN: local.tongCongNhan || '', CO_MAT: local.coMat || '', GHI_CHU: local.ghiChu || '' }))
+    setData(d => ({
+      ...(d || {}),
+      TONG_CONG_NHAN: local.tongCongNhan || '',
+      CO_MAT: local.coMat || '',
+      GHI_CHU: local.ghiChu || '',
+      VANG_BUOI_SANG: c.sang,
+      VANG_BUOI_CHIEU: c.chieu,
+      VANG_CA_NGAY: c.caNgay,
+    }))
     return true
   }
-  const [data, setData] = useState(null), [form, setForm] = useState({ tongCongNhan: '', coMat: '', ghiChu: '' }), [msg, setMsg] = useState('')
+  const [data, setData] = useState(() => {
+    const c = readLocalAbsenceCounts()
+    return { VANG_BUOI_SANG: c.sang, VANG_BUOI_CHIEU: c.chieu, VANG_CA_NGAY: c.caNgay }
+  }), [form, setForm] = useState({ tongCongNhan: '', coMat: '', ghiChu: '' }), [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
   useEffect(() => {
     const local = readLocalSummary()
+    const counts = readLocalAbsenceCounts()
+    setData(d => ({ ...(d || {}), VANG_BUOI_SANG: counts.sang, VANG_BUOI_CHIEU: counts.chieu, VANG_CA_NGAY: counts.caNgay }))
     const hasLocal = applyLocalSummary(local)
     if (hasLocal) setMsg('Đang hiển thị dữ liệu đã lưu trên máy.')
     api('getBaoCaoTong', [today(), session.boPhan]).then(r => {
       const latestLocal = readLocalSummary()
+      const latestCounts = readLocalAbsenceCounts()
       if (latestLocal?.localOnly || latestLocal?.cachedAt) {
-        setData({ ...r, TONG_CONG_NHAN: latestLocal.tongCongNhan || r.TONG_CONG_NHAN || '', CO_MAT: latestLocal.coMat || r.CO_MAT || '', GHI_CHU: latestLocal.ghiChu || r.GHI_CHU || '' })
+        setData({
+          ...r,
+          TONG_CONG_NHAN: latestLocal.tongCongNhan || r.TONG_CONG_NHAN || '',
+          CO_MAT: latestLocal.coMat || r.CO_MAT || '',
+          GHI_CHU: latestLocal.ghiChu || r.GHI_CHU || '',
+          VANG_BUOI_SANG: latestCounts.sang || r.VANG_BUOI_SANG || 0,
+          VANG_BUOI_CHIEU: latestCounts.chieu || r.VANG_BUOI_CHIEU || 0,
+          VANG_CA_NGAY: latestCounts.caNgay || r.VANG_CA_NGAY || 0,
+        })
         applyLocalSummary(latestLocal)
       } else {
-        setData(r)
+        setData({
+          ...r,
+          VANG_BUOI_SANG: latestCounts.sang || r.VANG_BUOI_SANG || 0,
+          VANG_BUOI_CHIEU: latestCounts.chieu || r.VANG_BUOI_CHIEU || 0,
+          VANG_CA_NGAY: latestCounts.caNgay || r.VANG_CA_NGAY || 0,
+        })
         if (!hasLocal) setForm({ tongCongNhan: r.TONG_CONG_NHAN || '', coMat: r.CO_MAT || '', ghiChu: r.GHI_CHU || '' })
       }
     }).catch(e => { if (!hasLocal) setMsg(e.message) })
@@ -774,8 +811,16 @@ function ReportScreen({ session }) {
         setMsg('✅ Đã cập nhật báo cáo bộ phận trên máy.')
       }
     }
+    const onDetail = () => {
+      const c = readLocalAbsenceCounts()
+      setData(d => ({ ...(d || {}), VANG_BUOI_SANG: c.sang, VANG_BUOI_CHIEU: c.chieu, VANG_CA_NGAY: c.caNgay }))
+    }
     window.addEventListener('erp-dept-summary-updated', onLocal)
-    return () => window.removeEventListener('erp-dept-summary-updated', onLocal)
+    window.addEventListener('erp-local-detail-updated', onDetail)
+    return () => {
+      window.removeEventListener('erp-dept-summary-updated', onLocal)
+      window.removeEventListener('erp-local-detail-updated', onDetail)
+    }
   }, [session.boPhan])
   const rows = [['Tổng công nhân', form.tongCongNhan || 0, 'var(--color-blue)'], ['Có mặt', form.coMat || 0, 'var(--color-green)'], ['Vắng sáng', data?.VANG_BUOI_SANG || 0, 'var(--color-orange)'], ['Vắng chiều', data?.VANG_BUOI_CHIEU || 0, 'var(--color-orange)'], ['Vắng cả ngày', data?.VANG_CA_NGAY || 0, 'var(--color-red)']]
   async function save() {
@@ -784,7 +829,8 @@ function ReportScreen({ session }) {
     const payload = { requestId, ngay: today(), boPhan: session.boPhan, toTruong: session.tenToTruong, tongCongNhan: form.tongCongNhan, coMat: form.coMat, ghiChu: form.ghiChu }
     setSaving(true)
     saveLocalBaoCaoTong(session, payload)
-    setData(d => ({ ...(d || {}), TONG_CONG_NHAN: payload.tongCongNhan, CO_MAT: payload.coMat, GHI_CHU: payload.ghiChu }))
+    const c = readLocalAbsenceCounts()
+    setData(d => ({ ...(d || {}), TONG_CONG_NHAN: payload.tongCongNhan, CO_MAT: payload.coMat, GHI_CHU: payload.ghiChu, VANG_BUOI_SANG: c.sang, VANG_BUOI_CHIEU: c.chieu, VANG_CA_NGAY: c.caNgay }))
     const n = queueSave('saveBaoCaoTong', [payload], { requestId, screen: 'bao-cao' })
     setMsg(`💾 ĐÃ LƯU TRÊN MÁY. Đang đồng bộ nền (${n}).`)
     setSaving(false)
@@ -793,10 +839,11 @@ function ReportScreen({ session }) {
       setMsg(left ? `💾 Đã lưu trên máy. Còn ${left} mục chờ đồng bộ.` : '✅ ĐÃ ĐỒNG BỘ BÁO CÁO BỘ PHẬN.')
       setTimeout(() => api('getBaoCaoTong', [today(), session.boPhan]).then(r => {
         const latestLocal = readLocalSummary()
+        const latestCounts = readLocalAbsenceCounts()
         if (latestLocal?.localOnly || latestLocal?.cachedAt) {
-          setData({ ...r, TONG_CONG_NHAN: latestLocal.tongCongNhan || r.TONG_CONG_NHAN || '', CO_MAT: latestLocal.coMat || r.CO_MAT || '', GHI_CHU: latestLocal.ghiChu || r.GHI_CHU || '' })
+          setData({ ...r, TONG_CONG_NHAN: latestLocal.tongCongNhan || r.TONG_CONG_NHAN || '', CO_MAT: latestLocal.coMat || r.CO_MAT || '', GHI_CHU: latestLocal.ghiChu || r.GHI_CHU || '', VANG_BUOI_SANG: latestCounts.sang || r.VANG_BUOI_SANG || 0, VANG_BUOI_CHIEU: latestCounts.chieu || r.VANG_BUOI_CHIEU || 0, VANG_CA_NGAY: latestCounts.caNgay || r.VANG_CA_NGAY || 0 })
         } else {
-          setData(r)
+          setData({ ...r, VANG_BUOI_SANG: latestCounts.sang || r.VANG_BUOI_SANG || 0, VANG_BUOI_CHIEU: latestCounts.chieu || r.VANG_BUOI_CHIEU || 0, VANG_CA_NGAY: latestCounts.caNgay || r.VANG_CA_NGAY || 0 })
         }
       }).catch(() => {}), 25000)
     }).catch(() => setMsg('💾 Đã lưu trên máy. Sẽ tự đồng bộ khi mạng ổn.'))
@@ -1514,6 +1561,26 @@ function toInputDate(v) {
   return v
 }
 function fromInputDate(v) { if (!v) return ''; const [yy, mm, dd] = v.split('-'); return `${dd}/${mm}/${yy}` }
+function escapeHtmlCell(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))
+}
+function downloadHtmlExcel(filename, title, headers, rows) {
+  const bodyRows = rows.map(row => '<tr>' + row.map(v => `<td>${escapeHtmlCell(v)}</td>`).join('') + '</tr>').join('')
+  const html = `<!doctype html><html><head><meta charset="UTF-8"></head><body><table border="1"><thead><tr><th colspan="${headers.length}" style="font-size:20px">${escapeHtmlCell(title)}</th></tr><tr>${headers.map(h => `<th>${escapeHtmlCell(h)}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table></body></html>`
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename.endsWith('.xls') ? filename : filename + '.xls'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  return url
+}
+function safeFileName(value) {
+  return stripVietnamese(value || 'bao_cao').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'bao_cao'
+}
 function monthStartInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01` }
 function monthEndInput() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(new Date(d.getFullYear(), d.getMonth()+1, 0).getDate())}` }
 function PrintOvertimeScreen({ session, departments }) {
@@ -1549,14 +1616,15 @@ function PrintOvertimeScreen({ session, departments }) {
       denNgay: fromInputDate(denNgay),
       loaiTangCa: showLoaiTangCa ? loaiTangCa : 'Tất cả',
       chiTiet: loaiBaoCao === 'Chuyển bộ phận' ? 'Điều động sang tổ khác' : 'Tất cả',
+      tieuDe: reportTitle(),
     }
   }
   function reportTitle() {
-    if (loaiBaoCao === 'Tăng ca') return showLoaiTangCa && loaiTangCa !== 'Tất cả' ? loaiTangCa : 'Báo cáo tăng ca'
-    if (loaiBaoCao === 'Làm ngày lễ') return 'Báo cáo làm ngày lễ'
-    if (loaiBaoCao === 'Chuyển bộ phận') return 'Báo cáo chuyển bộ phận'
-    if (loaiBaoCao === 'Biến động') return 'Báo cáo biến động nhân sự'
-    if (loaiBaoCao === 'Vắng mặt') return 'Báo cáo vắng mặt'
+    if (loaiBaoCao === 'Tăng ca') return showLoaiTangCa && loaiTangCa !== 'Tất cả' ? `Danh sách ${loaiTangCa.toLowerCase()}` : 'DANH SÁCH TĂNG CA'
+    if (loaiBaoCao === 'Làm ngày lễ') return 'DANH SÁCH LÀM NGÀY LỄ'
+    if (loaiBaoCao === 'Chuyển bộ phận') return 'DANH SÁCH CHUYỂN BỘ PHẬN'
+    if (loaiBaoCao === 'Biến động') return 'DANH SÁCH BIẾN ĐỘNG'
+    if (loaiBaoCao === 'Vắng mặt') return 'DANH SÁCH VẮNG MẶT'
     return loaiBaoCao
   }
   function cellValue(r, keys, fallback = '') {
@@ -1580,7 +1648,17 @@ function PrintOvertimeScreen({ session, departments }) {
         if (loaiBaoCao !== 'Tăng ca') throw firstError
         r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), '', loaiTangCa])
       }
-      const data = normalizePreviewRows(r)
+      let data = normalizePreviewRows(r)
+      data = data.filter(row => {
+        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI'], '')
+        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], '')
+        if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || ct.startsWith('Vắng')
+        if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự') && !sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Chuyển bộ phận') return sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Làm ngày lễ') return sameText(loai, 'Làm ngày lễ') || sameText(ct, 'Đăng ký làm ngày lễ')
+        if (loaiBaoCao === 'Tăng ca') return sameText(loai, 'Tăng ca') || ct.startsWith('Tăng ca')
+        return true
+      })
       setRows(data)
       writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
       setMsg(r?.message || (data.length ? `✅ Đã tải đủ ${data.length} dòng ${reportTitle()}.` : 'Không có dữ liệu theo bộ lọc.'))
@@ -1593,19 +1671,50 @@ function PrintOvertimeScreen({ session, departments }) {
     setBusy(true)
     setMsg(`⏳ Đang tạo file Excel: ${reportTitle()}...`)
     try {
-      let r
-      try {
-        r = await api('exportBaoCaoChiTietExcel', [reportParams()])
-      } catch (firstError) {
-        if (loaiBaoCao !== 'Tăng ca') throw firstError
-        r = await api('exportTangCaExcel', [{ boPhan: bp, tuNgay: fromInputDate(tuNgay), denNgay: fromInputDate(denNgay), loaiTangCa }])
+      let data = rows
+      if (!data.length) {
+        try {
+          const r = await api('getBaoCaoChiTietXemTruoc', [reportParams()])
+          data = normalizePreviewRows(r)
+        } catch (e) {
+          data = []
+        }
       }
-      const url = r?.url || r?.fileUrl || r?.downloadUrl || r
-      const realUrl = typeof url === 'string' ? url : ''
-      setFileUrl(realUrl)
-      setMsg(realUrl ? `✅ Đã tạo file Excel: ${reportTitle()}.` : `✅ Đã gửi yêu cầu xuất Excel: ${reportTitle()}.`)
-      if (realUrl) window.open(realUrl, '_blank')
-    } catch (e) { setMsg(`❌ Chưa xuất được Excel ${reportTitle()}: ${e.message || 'Cần cập nhật Apps Script.'}`) }
+      data = (data || []).filter(row => {
+        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI'], '')
+        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], '')
+        if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || String(ct).startsWith('Vắng')
+        if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự') && !sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Chuyển bộ phận') return sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Làm ngày lễ') return sameText(loai, 'Làm ngày lễ') || sameText(ct, 'Đăng ký làm ngày lễ')
+        if (loaiBaoCao === 'Tăng ca') return sameText(loai, 'Tăng ca') || String(ct).startsWith('Tăng ca')
+        return true
+      })
+      setRows(data)
+      writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
+
+      const filename = `${safeFileName(reportTitle())}_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
+      let headers, body
+      if (loaiBaoCao === 'Tăng ca') {
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại tăng ca','Bắt đầu','Kết thúc','Số giờ']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET'], loaiTangCa), cellValue(r, ['batDau','BAT_DAU']), cellValue(r, ['ketThuc','KET_THUC']), cellValue(r, ['soGio','SO_GIO'])])
+      } else if (loaiBaoCao === 'Vắng mặt') {
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Buổi vắng','Trạng thái','Ghi chú']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Vắng mặt'), cellValue(r, ['trangThai','TRANG_THAI'], 'Có phép'), cellValue(r, ['ghiChu','GHI_CHU'])])
+      } else if (loaiBaoCao === 'Biến động') {
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại biến động','Trạng thái','Ghi chú']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Biến động'), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
+      } else if (loaiBaoCao === 'Làm ngày lễ') {
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Trạng thái','Ghi chú']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
+      } else {
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận gốc','Tổ chuyển đến','Ngày','Trạng thái']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN']), cellValue(r, ['ngay','NGAY']), cellValue(r, ['trangThai','TRANG_THAI'])])
+      }
+      downloadHtmlExcel(filename, reportTitle(), headers, body)
+      setFileUrl('')
+      setMsg(data.length ? `✅ Đã tạo file Excel đúng mẫu: ${reportTitle()}.` : `✅ Đã tạo file Excel ${reportTitle()} nhưng chưa có dòng dữ liệu.`)
+    } catch (e) { setMsg(`❌ Chưa xuất được Excel ${reportTitle()}: ${e.message || 'Lỗi xuất file.'}`) }
     finally { setBusy(false) }
   }
 

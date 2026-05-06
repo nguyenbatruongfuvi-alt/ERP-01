@@ -1,4 +1,4 @@
-const CACHE_NAME = 'erp-v30-ui-shell-v56-report-print-final';
+const CACHE_NAME = 'erp-v30-ui-shell-v57-report-dept-print-fix';
 const APP_SHELL = ['/', '/index.html', '/manifest.json', '/logo-ph.png'];
 
 self.addEventListener('install', (event) => {
