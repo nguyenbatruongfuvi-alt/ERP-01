@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.59_TANG_CA_THANG_EXCEL'
+const ERP_CLIENT_VERSION = 'V30.58_COMPANY_MODULES_FIX'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -1623,40 +1623,22 @@ function PrintOvertimeScreen({ session, departments }) {
   const [rows, setRows] = useState([]), [msg, setMsg] = useState(''), [bp, setBp] = useState('Tất cả')
   const [loaiTangCa, setLoaiTangCa] = useState('Tất cả')
   const [tuNgay, setTuNgay] = useState(monthStartInput()), [denNgay, setDenNgay] = useState(monthEndInput()), [busy, setBusy] = useState(false), [fileUrl, setFileUrl] = useState('')
-  const [rowsMeta, setRowsMeta] = useState(null)
   const showLoaiTangCa = loaiBaoCao === 'Tăng ca'
-  const cacheKey = localKey('in_bao_cao_preview_v61', [loaiBaoCao, bp, showLoaiTangCa ? loaiTangCa : 'NA', tuNgay, denNgay])
-
-  function currentMeta() { return { loaiBaoCao, bp, loaiTangCa: showLoaiTangCa ? loaiTangCa : 'NA', tuNgay, denNgay } }
-  function sameMeta(a, b = currentMeta()) {
-    return !!a && a.loaiBaoCao === b.loaiBaoCao && a.bp === b.bp && a.loaiTangCa === b.loaiTangCa && a.tuNgay === b.tuNgay && a.denNgay === b.denNgay
-  }
+  const cacheKey = localKey('in_bao_cao_preview', [loaiBaoCao, bp, showLoaiTangCa ? loaiTangCa : 'NA', tuNgay, denNgay])
 
   useEffect(() => {
     const cached = readJson(cacheKey, null)
-    const meta = currentMeta()
-    if (cached?.rows && sameMeta(cached.meta, meta)) {
+    if (cached?.rows) {
       setRows(cached.rows)
-      setRowsMeta(meta)
       setMsg('Đang hiển thị dữ liệu đã lưu trên máy.')
     } else {
       setRows([])
-      setRowsMeta(null)
       setMsg('')
     }
   }, [cacheKey])
 
-  function onChangeReportType(value) {
-    setLoaiBaoCao(value)
-    setFileUrl('')
-    setRows([])
-    setRowsMeta(null)
-    setMsg('')
-    if (value !== 'Tăng ca') setLoaiTangCa('Tất cả')
-  }
-
   function validateRange() { if (tuNgay && denNgay && tuNgay > denNgay) { setMsg('Từ ngày không được lớn hơn đến ngày.'); return false } return true }
-  function normalizePreviewRows(r) { return Array.isArray(r) ? r : (r?.rows || r?.items || r?.data || r?.chiTiet || []) }
+  function normalizePreviewRows(r) { return Array.isArray(r) ? r : (r?.rows || r?.items || []) }
   function reportParams() {
     const mappedLoai = loaiBaoCao === 'Vắng mặt' ? 'Báo cáo vắng' : (loaiBaoCao === 'Biến động' || loaiBaoCao === 'Chuyển bộ phận') ? 'Biến động nhân sự' : loaiBaoCao
     return {
@@ -1685,51 +1667,34 @@ function PrintOvertimeScreen({ session, departments }) {
     }
     return fallback
   }
-  function rowLoai(row) { return stripVietnamese(cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI','Loại báo cáo'], '')) }
-  function rowChiTiet(row) { return stripVietnamese(cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa','Loại tăng ca','Chi tiết'], '')) }
-  function rowDept(row) { return cellValue(row, ['boPhanBaoCao','BO_PHAN_BAO_CAO','boPhanGoc','boPhan','BO_PHAN_GOC','Bộ phận báo cáo','Bộ phận'], '') }
-  function matchCurrentReport(row) {
-    const loai = rowLoai(row)
-    const ct = rowChiTiet(row)
-    const dept = rowDept(row)
-    if (bp !== 'Tất cả' && dept && !sameText(dept, bp)) return false
-    if (loaiBaoCao === 'Vắng mặt') return loai === stripVietnamese('Báo cáo vắng') || ct.includes('vang')
-    if (loaiBaoCao === 'Biến động') return loai === stripVietnamese('Biến động nhân sự') && !ct.includes('dieu dong sang to khac')
-    if (loaiBaoCao === 'Chuyển bộ phận') return loai === stripVietnamese('Biến động nhân sự') && ct.includes('dieu dong sang to khac')
-    if (loaiBaoCao === 'Làm ngày lễ') return loai === stripVietnamese('Làm ngày lễ') || ct.includes('lam ngay le') || ct.includes('dang ky lam ngay le')
-    if (loaiBaoCao === 'Tăng ca') {
-      const isOt = loai === stripVietnamese('Tăng ca') || ct.includes('tang ca')
-      if (!isOt) return false
-      if (loaiTangCa !== 'Tất cả') return sameText(cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], ''), loaiTangCa)
-      return true
-    }
-    return true
-  }
-  function filterCurrentRows(rawRows) { return (Array.isArray(rawRows) ? rawRows : []).filter(matchCurrentReport) }
-  function savePreviewRows(data) {
-    const meta = currentMeta()
-    setRows(data)
-    setRowsMeta(meta)
-    writeJson(cacheKey, { rows: data, meta, cachedAt: Date.now() })
-  }
-  async function fetchCurrentRows() {
-    let r
-    try {
-      r = await api('getBaoCaoChiTietXemTruoc', [reportParams()])
-    } catch (firstError) {
-      if (loaiBaoCao !== 'Tăng ca') throw firstError
-      r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), '', loaiTangCa])
-    }
-    return { raw: r, data: filterCurrentRows(normalizePreviewRows(r)) }
-  }
   async function load() {
     if (!validateRange()) return
     setBusy(true)
-    setMsg(`⏳ Đang lấy dữ liệu xem trước: ${reportTitle()}...`)
+    setMsg('⏳ Đang lấy dữ liệu xem trước...')
     try {
-      const { raw, data } = await fetchCurrentRows()
-      savePreviewRows(data)
-      setMsg(raw?.message || (data.length ? `✅ Đã tải ${data.length} dòng ${reportTitle()}.` : `Không có dữ liệu cho ${reportTitle()} theo bộ lọc.`))
+      let r
+      try {
+        // Action mới đọc trực tiếp bảng BAO_CAO_CHI_TIET, lọc đúng LOAI_BAO_CAO / CHI_TIET / ngày / bộ phận.
+        r = await api('getBaoCaoChiTietXemTruoc', [reportParams()])
+      } catch (firstError) {
+        // Giữ tương thích bản cũ: chỉ fallback cho báo cáo Tăng ca vì Apps Script cũ chỉ biết tăng ca.
+        if (loaiBaoCao !== 'Tăng ca') throw firstError
+        r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), '', loaiTangCa])
+      }
+      let data = normalizePreviewRows(r)
+      data = data.filter(row => {
+        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI'], '')
+        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], '')
+        if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || ct.startsWith('Vắng')
+        if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự') && !sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Chuyển bộ phận') return sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Làm ngày lễ') return sameText(loai, 'Làm ngày lễ') || sameText(ct, 'Đăng ký làm ngày lễ')
+        if (loaiBaoCao === 'Tăng ca') return sameText(loai, 'Tăng ca') || ct.startsWith('Tăng ca')
+        return true
+      })
+      setRows(data)
+      writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
+      setMsg(r?.message || (data.length ? `✅ Đã tải đủ ${data.length} dòng ${reportTitle()}.` : 'Không có dữ liệu theo bộ lọc.'))
     } catch (e) { setMsg(e.message || 'Không xem trước được. Cần cập nhật Apps Script đọc BAO_CAO_CHI_TIET.') }
     finally { setBusy(false) }
   }
@@ -1739,142 +1704,45 @@ function PrintOvertimeScreen({ session, departments }) {
     setBusy(true)
     setMsg(`⏳ Đang tạo file Excel: ${reportTitle()}...`)
     try {
-      let data = []
-      try {
-        const fetched = await fetchCurrentRows()
-        data = fetched.data
-      } catch (e) {
-        // Chỉ dùng dữ liệu xem trước khi đúng cùng loại báo cáo. Không dùng lại dữ liệu Tăng ca cho Vắng/Biến động/Chuyển bộ phận.
-        data = sameMeta(rowsMeta) ? filterCurrentRows(rows) : []
-      }
-      savePreviewRows(data)
-
-      const monthFromDate = (value) => {
-        const s = String(value || '').trim()
-        if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-          const [, mm, yy] = s.split('/')
-          return `${mm}/${yy}`
+      let data = rows
+      if (!data.length) {
+        try {
+          const r = await api('getBaoCaoChiTietXemTruoc', [reportParams()])
+          data = normalizePreviewRows(r)
+        } catch (e) {
+          data = []
         }
-        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-          const [yy, mm] = s.split('-')
-          return `${mm}/${yy}`
-        }
-        return monthNow()
       }
-      const dayFromDate = (value) => {
-        const s = String(value || '').trim()
-        if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return Number(s.split('/')[0]) || 0
-        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return Number(s.split('-')[2]) || 0
-        return 0
-      }
-      const toNumber = (value) => {
-        const n = Number(String(value ?? '').replace(',', '.'))
-        return Number.isFinite(n) ? n : 0
-      }
-      const employeeInfo = (r) => {
-        const ngay = cellValue(r, ['ngay','NGAY','Ngày'], '')
-        const thang = monthFromDate(ngay || fromInputDate(tuNgay))
-        const maNv = cellValue(r, ['maNv','ma','MA_NV','Mã NV','Ma NV'], '')
-        const tenNv = cellValue(r, ['tenNv','ten','hoTen','TEN_NV','Tên NV','Ten NV','Họ và tên'], '')
-        const boPhan = cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC','BO_PHAN_BAO_CAO','Bộ phận','Bộ phận gốc'], bp === 'Tất cả' ? '' : bp)
-        return { ngay, thang, maNv, tenNv, boPhan, key: `${thang}__${boPhan}__${maNv || tenNv}` }
-      }
-      const sortByEmployee = (a, b) => String(a.boPhan).localeCompare(String(b.boPhan), 'vi') || String(a.maNv).localeCompare(String(b.maNv), 'vi') || String(a.tenNv).localeCompare(String(b.tenNv), 'vi')
-      const daysHeaders = Array.from({ length: 31 }, (_, i) => String(i + 1))
+      data = (data || []).filter(row => {
+        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI'], '')
+        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], '')
+        if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || String(ct).startsWith('Vắng')
+        if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự') && !sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Chuyển bộ phận') return sameText(ct, 'Điều động sang tổ khác')
+        if (loaiBaoCao === 'Làm ngày lễ') return sameText(loai, 'Làm ngày lễ') || sameText(ct, 'Đăng ký làm ngày lễ')
+        if (loaiBaoCao === 'Tăng ca') return sameText(loai, 'Tăng ca') || String(ct).startsWith('Tăng ca')
+        return true
+      })
+      setRows(data)
+      writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
 
-      let filename = `${safeFileName(reportTitle())}_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
+      const filename = `${safeFileName(reportTitle())}_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
       let headers, body
-
       if (loaiBaoCao === 'Tăng ca') {
-        const grouped = new Map()
-        ;(data || []).forEach(r => {
-          const info = employeeInfo(r)
-          const day = dayFromDate(info.ngay)
-          if (!day || day < 1 || day > 31) return
-          if (!grouped.has(info.key)) grouped.set(info.key, { ...info, days: Array(31).fill(0) })
-          grouped.get(info.key).days[day - 1] += toNumber(cellValue(r, ['soGio','SO_GIO','Số giờ'], 0))
-        })
-        const exportRows = Array.from(grouped.values()).sort(sortByEmployee)
-        headers = ['THANG','BO_PHAN','MA_NV','TEN_NV', ...daysHeaders, 'TONG_GIO']
-        body = exportRows.map(row => {
-          const total = row.days.reduce((s, n) => s + n, 0)
-          const days = row.days.map(n => n ? Number(n.toFixed(2)) : '')
-          return [row.thang, row.boPhan, row.maNv, row.tenNv, ...days, Number(total.toFixed(2))]
-        })
-        filename = `TANG_CA_THANG_${safeFileName(bp)}_${safeFileName(monthFromDate(fromInputDate(tuNgay)))}.xls`
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại tăng ca','Bắt đầu','Kết thúc','Số giờ']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET'], loaiTangCa), cellValue(r, ['batDau','BAT_DAU']), cellValue(r, ['ketThuc','KET_THUC']), cellValue(r, ['soGio','SO_GIO'])])
       } else if (loaiBaoCao === 'Vắng mặt') {
-        const absenceValue = (r) => {
-          const ct = stripVietnamese(cellValue(r, ['chiTiet','CHI_TIET','Chi tiết'], ''))
-          const st = cellValue(r, ['trangThai','TRANG_THAI','Trạng thái'], '') || 'Có phép'
-          if (ct.includes('buoi sang')) return `Sáng-${st}`
-          if (ct.includes('buoi chieu')) return `Chiều-${st}`
-          if (ct.includes('ca ngay')) return `Cả ngày-${st}`
-          return st || 'Vắng'
-        }
-        const absencePoint = (r) => {
-          const ct = stripVietnamese(cellValue(r, ['chiTiet','CHI_TIET','Chi tiết'], ''))
-          if (ct.includes('buoi sang') || ct.includes('buoi chieu')) return 0.5
-          return 1
-        }
-        const grouped = new Map()
-        ;(data || []).forEach(r => {
-          const info = employeeInfo(r)
-          const day = dayFromDate(info.ngay)
-          if (!day || day < 1 || day > 31) return
-          if (!grouped.has(info.key)) grouped.set(info.key, { ...info, days: Array(31).fill(''), total: 0 })
-          const g = grouped.get(info.key)
-          const val = absenceValue(r)
-          g.days[day - 1] = g.days[day - 1] ? `${g.days[day - 1]}; ${val}` : val
-          g.total += absencePoint(r)
-        })
-        const exportRows = Array.from(grouped.values()).sort(sortByEmployee)
-        headers = ['THANG','BO_PHAN','MA_NV','TEN_NV', ...daysHeaders, 'TONG_NGAY_VANG']
-        body = exportRows.map(row => [row.thang, row.boPhan, row.maNv, row.tenNv, ...row.days, Number(row.total.toFixed(2))])
-        filename = `VANG_MAT_THANG_${safeFileName(bp)}_${safeFileName(monthFromDate(fromInputDate(tuNgay)))}.xls`
-      } else if (loaiBaoCao === 'Làm ngày lễ') {
-        const grouped = new Map()
-        ;(data || []).forEach(r => {
-          const info = employeeInfo(r)
-          const day = dayFromDate(info.ngay)
-          if (!day || day < 1 || day > 31) return
-          if (!grouped.has(info.key)) grouped.set(info.key, { ...info, days: Array(31).fill(''), total: 0 })
-          const g = grouped.get(info.key)
-          const gio = toNumber(cellValue(r, ['soGio','SO_GIO','Số giờ'], 0))
-          g.days[day - 1] = gio ? gio : 'X'
-          g.total += gio || 1
-        })
-        const exportRows = Array.from(grouped.values()).sort(sortByEmployee)
-        headers = ['THANG','BO_PHAN','MA_NV','TEN_NV', ...daysHeaders, 'TONG_CONG_LE']
-        body = exportRows.map(row => [row.thang, row.boPhan, row.maNv, row.tenNv, ...row.days, Number(row.total.toFixed(2))])
-        filename = `LAM_NGAY_LE_THANG_${safeFileName(bp)}_${safeFileName(monthFromDate(fromInputDate(tuNgay)))}.xls`
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Buổi vắng','Trạng thái','Ghi chú']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Vắng mặt'), cellValue(r, ['trangThai','TRANG_THAI'], 'Có phép'), cellValue(r, ['ghiChu','GHI_CHU'])])
       } else if (loaiBaoCao === 'Biến động') {
-        headers = ['STT','NGAY','BO_PHAN','MA_NV','TEN_NV','LOAI_BIEN_DONG','TRANG_THAI','LY_DO','GHI_CHU']
-        body = data.map((r, i) => [
-          i + 1,
-          cellValue(r, ['ngay','NGAY','Ngày']),
-          cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC','BO_PHAN_BAO_CAO','Bộ phận'], bp),
-          cellValue(r, ['maNv','ma','MA_NV','Mã NV']),
-          cellValue(r, ['tenNv','ten','hoTen','TEN_NV','Tên NV','Họ và tên']),
-          cellValue(r, ['chiTiet','CHI_TIET','Chi tiết'], 'Biến động'),
-          cellValue(r, ['trangThai','TRANG_THAI','Trạng thái'], 'Đã chọn'),
-          cellValue(r, ['lyDo','LY_DO','Lý do'], ''),
-          cellValue(r, ['ghiChu','GHI_CHU','Ghi chú'], ''),
-        ])
-        filename = `BIEN_DONG_NHAN_SU_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại biến động','Trạng thái','Ghi chú']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Biến động'), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
+      } else if (loaiBaoCao === 'Làm ngày lễ') {
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Trạng thái','Ghi chú']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
       } else {
-        headers = ['STT','NGAY','MA_NV','TEN_NV','BO_PHAN_GOC','TO_CHUYEN_DEN','TRANG_THAI','LY_DO','GHI_CHU']
-        body = data.map((r, i) => [
-          i + 1,
-          cellValue(r, ['ngay','NGAY','Ngày']),
-          cellValue(r, ['maNv','ma','MA_NV','Mã NV']),
-          cellValue(r, ['tenNv','ten','hoTen','TEN_NV','Tên NV','Họ và tên']),
-          cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC','Bộ phận gốc'], bp),
-          cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN','Tổ chuyển đến'], ''),
-          cellValue(r, ['trangThai','TRANG_THAI','Trạng thái'], ''),
-          cellValue(r, ['lyDo','LY_DO','Lý do'], ''),
-          cellValue(r, ['ghiChu','GHI_CHU','Ghi chú'], ''),
-        ])
-        filename = `CHUYEN_BO_PHAN_${safeFileName(bp)}_${tuNgay}_${denNgay}.xls`
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận gốc','Tổ chuyển đến','Ngày','Trạng thái']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN']), cellValue(r, ['ngay','NGAY']), cellValue(r, ['trangThai','TRANG_THAI'])])
       }
       downloadHtmlExcel(filename, reportTitle(), headers, body)
       setFileUrl('')
@@ -1913,7 +1781,7 @@ function PrintOvertimeScreen({ session, departments }) {
     return <div className="table-scroll" style={{ marginTop: 12 }}><table className="summary-table"><thead><tr><th>STT</th><th>Mã NV</th><th>Họ và tên</th><th>Bộ phận gốc</th><th>Tổ chuyển đến</th><th>Ngày</th><th>Trạng thái</th></tr></thead><tbody>{rows.slice(0, 50).map((r, i) => <tr key={(cellValue(r, ['maNv','ma','MA_NV'], '') || i) + '_' + i}><td>{i + 1}</td><td>{cellValue(r, ['maNv','ma','MA_NV'])}</td><td>{cellValue(r, ['tenNv','ten','hoTen','TEN_NV'])}</td><td>{cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp)}</td><td>{cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN'])}</td><td>{cellValue(r, ['ngay','NGAY'])}</td><td>{cellValue(r, ['trangThai','TRANG_THAI'])}</td></tr>)}</tbody></table></div>
   }
 
-  return <><div className="screen-title-row"><span className="screen-title-icon">📄</span><h1>In báo cáo</h1></div><div className="card print-overtime-card"><label className="field-label">Loại báo cáo</label><select className="form-control form-control-sm" value={loaiBaoCao} onChange={e => onChangeReportType(e.target.value)}>{reportTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => { setBp(e.target.value); setRows([]); setRowsMeta(null); setMsg('') }}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select>{showLoaiTangCa && <><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => { setLoaiTangCa(e.target.value); setRows([]); setRowsMeta(null); setMsg('') }}>{overtimeTypes.map(x => <option key={x}>{x}</option>)}</select></>}<div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => { setTuNgay(e.target.value); setRows([]); setRowsMeta(null); setMsg('') }} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => { setDenNgay(e.target.value); setRows([]); setRowsMeta(null); setMsg('') }} /></div></div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được') && !msg.includes('Chưa')} />{renderPreviewTable()}</div></>
+  return <><div className="screen-title-row"><span className="screen-title-icon">📄</span><h1>In báo cáo</h1></div><div className="card print-overtime-card"><label className="field-label">Loại báo cáo</label><select className="form-control form-control-sm" value={loaiBaoCao} onChange={e => { setLoaiBaoCao(e.target.value); setFileUrl(''); setRows([]); setMsg('') }}>{reportTypes.map(x => <option key={x} value={x}>{x}</option>)}</select><label className="field-label">Bộ phận</label><select className="form-control form-control-sm" value={bp} onChange={e => setBp(e.target.value)}><option>Tất cả</option>{departments.map(x => <option key={x}>{x}</option>)}</select>{showLoaiTangCa && <><label className="field-label">Loại tăng ca</label><select className="form-control form-control-sm" value={loaiTangCa} onChange={e => setLoaiTangCa(e.target.value)}>{overtimeTypes.map(x => <option key={x} value={x}>{x}</option>)}</select></>}<div className="date-range-grid"><div><label className="field-label">Từ ngày</label><input type="date" className="form-control form-control-sm" value={tuNgay} onChange={e => setTuNgay(e.target.value)} /></div><div><label className="field-label">Đến ngày</label><input type="date" className="form-control form-control-sm" value={denNgay} onChange={e => setDenNgay(e.target.value)} /></div></div><button className="secondary-button" disabled={busy} onClick={load}>👁️ Xem trước</button><div style={{ height: 10 }} /><button className="primary-button export-button" disabled={busy} onClick={exportExcel}>📥 Xuất Excel</button>{fileUrl && <><div style={{ height: 10 }} /><button className="secondary-button" onClick={shareZalo}>📲 Gửi link qua Zalo</button><div className="excel-link-box">{fileUrl}</div></>}<Status text={msg} ok={!msg.includes('❌') && !msg.includes('không được') && !msg.includes('Chưa')} />{renderPreviewTable()}</div></>
 }
 function ScreenRouter({ screen, session, cache, departments, setSession }) { if (screen === 'bao-cao') return <ReportScreen session={session} />; if (screen === 'tong-cty') return <CompanyScreen session={session} />; if (screen === 'tang-ca') return <DataEntryScreen type="Tăng ca" items={['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất']} session={session} cache={cache} />; if (screen === 'bien-dong') return <DataEntryScreen type="Biến động" items={['Công nhân mới', 'Nghỉ việc', 'Xin về sớm', 'Điều động sang tổ khác']} session={session} cache={cache} />; if (screen === 'vang') return <DataEntryScreen type="Vắng mặt" items={['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày']} session={session} cache={cache} />; if (screen === 'ngay-le') return <DataEntryScreen type="Làm ngày lễ" items={['Đăng ký làm ngày lễ']} session={session} cache={cache} />; if (screen === 'giao-viec') return <TaskScreen session={session} />; if (screen === 'in-tang-ca') return <PrintOvertimeScreen session={session} departments={departments} />; if (screen === 'nhan-su') return <StaffScreen session={session} cache={cache} />; if (screen === 'tai-khoan') return <AccountScreen session={session} setSession={setSession} />; return <ReportScreen session={session} /> }
 function App() {
