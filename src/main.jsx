@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.57_REPORT_DEPT_PRINT_FIX'
+const ERP_CLIENT_VERSION = 'V30.58_COMPANY_MODULES_FIX'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -881,6 +881,39 @@ function CompanyDeptCard({ row, index, moduleId, onOpen }) {
     </div>
   </button>
 }
+
+
+// =========================
+// V30.58 COMPANY MODULES FIX
+// Sửa lỗi trắng màn hình: ReferenceError: companyModules is not defined
+// Dùng cho màn Báo cáo công ty và modal xem chi tiết từng bộ phận.
+// =========================
+const companyModules = [
+  {
+    id: 'tonghop',
+    label: 'Tổng hợp',
+    loai: 'Báo cáo vắng',
+    titles: ['Vắng buổi sáng', 'Vắng buổi chiều', 'Vắng cả ngày'],
+  },
+  {
+    id: 'tangca',
+    label: 'Tăng ca',
+    loai: 'Tăng ca',
+    titles: ['Tăng ca sáng', 'Tăng ca trưa', 'Tăng ca chiều', 'Tăng ca đột xuất'],
+  },
+  {
+    id: 'biendong',
+    label: 'Biến động',
+    loai: 'Biến động nhân sự',
+    titles: ['Chuyển bộ phận', 'Nghỉ việc', 'Nhân sự mới'],
+  },
+  {
+    id: 'ngayle',
+    label: 'Làm ngày lễ',
+    loai: 'Làm ngày lễ',
+    titles: ['Đăng ký làm ngày lễ'],
+  },
+]
 
 function reportLoaiForModule(module) {
   if (!module) return ''
