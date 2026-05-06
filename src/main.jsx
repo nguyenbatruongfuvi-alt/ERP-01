@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 
-const API_URL = 'https://script.google.com/macros/s/AKfycby0VCyaEdk0BGqFVflht1sGPdgH8uNgHcga1QXzEldTyMQGyqyTnjw_84z01puO6YrqvA/exec'
+const API_URL = 'https://script.google.com/macros/s/AKfycbxnxJRgtEyK6f92to3d2HTY5Cp7d7pZY5H4RfFM4KpmSQsf8uBDGArlN3b4uNn5lNei5w/exec'
 const API_KEY = ''
 const OFFLINE_QUEUE_KEY = 'erp_v30_offline_queue'
 const SESSION_KEY = 'erp_v30_session'
