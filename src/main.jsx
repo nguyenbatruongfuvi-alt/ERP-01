@@ -14,7 +14,7 @@ const LAST_DEPT_KEY = 'erp_v30_last_department'
 const BOOT_KEY = 'erp_v30_boot_init_v18'
 const PRELOAD_TTL_MS = 6 * 60 * 60 * 1000
 const SMART_REFRESH_MS = 60 * 1000
-const ERP_CLIENT_VERSION = 'V30.57_REPORT_DEPT_PRINT_FIX'
+const ERP_CLIENT_VERSION = 'V30.58_PRINT_FILTER_FIX'
 let SYNC_QUEUE_RUNNING = false
 // Khóa làm mới nền khi người dùng đang thao tác trong modal chọn nhân viên.
 window.__ERP_PICKING_ACTIVE__ = false
@@ -1634,35 +1634,95 @@ function PrintOvertimeScreen({ session, departments }) {
     }
     return fallback
   }
+  function cellText(r, keys, fallback = '') {
+    if (Array.isArray(r)) return String(fallback || '')
+    return String(cellValue(r, keys, fallback) || '').trim()
+  }
+  function rowLoai(r) { return cellText(r, ['loaiBaoCao','LOAI_BAO_CAO','LOAI BAO CAO','loai_bao_cao','loai','LOAI','F']) }
+  function rowChiTiet(r) { return cellText(r, ['chiTiet','CHI_TIET','CHI TIET','chi_tiet','loaiTangCa','G']) }
+  function rowNgay(r) { return cellText(r, ['ngay','NGAY','C']) }
+  function rowBoPhanBaoCao(r) { return cellText(r, ['boPhanBaoCao','BO_PHAN_BAO_CAO','BO PHAN BAO CAO','boPhan','BO_PHAN','E']) }
+  function parseVNDateToMs(v) {
+    const s = String(v || '').trim()
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (!m) return 0
+    return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime()
+  }
+  function inSelectedDateRange(r) {
+    const t = parseVNDateToMs(rowNgay(r))
+    const a = parseVNDateToMs(fromInputDate(tuNgay))
+    const b = parseVNDateToMs(fromInputDate(denNgay))
+    if (!t || !a || !b) return true
+    return t >= a && t <= b
+  }
+  function inSelectedDepartment(r) {
+    if (bp === 'Tất cả') return true
+    const rbp = rowBoPhanBaoCao(r) || cellText(r, ['boPhanGoc','BO_PHAN_GOC','J'])
+    return sameText(rbp, bp)
+  }
+  function filterRowsByReportType(inputRows) {
+    const arr = normalizePreviewRows(inputRows)
+    return arr.filter(row => {
+      const loai = rowLoai(row)
+      const ct = rowChiTiet(row)
+      if (!inSelectedDateRange(row) || !inSelectedDepartment(row)) return false
+      if (loaiBaoCao === 'Tăng ca') {
+        const okLoai = sameText(loai, 'Tăng ca') || String(ct).startsWith('Tăng ca')
+        const okChiTiet = loaiTangCa === 'Tất cả' || sameText(ct, loaiTangCa)
+        return okLoai && okChiTiet
+      }
+      if (loaiBaoCao === 'Làm ngày lễ') return sameText(loai, 'Làm ngày lễ') || sameText(ct, 'Đăng ký làm ngày lễ')
+      if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || String(ct).startsWith('Vắng')
+      if (loaiBaoCao === 'Chuyển bộ phận') return sameText(loai, 'Biến động nhân sự') && sameText(ct, 'Điều động sang tổ khác')
+      if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự')
+      return true
+    })
+  }
+  function dedupeOvertimeRows(inputRows) {
+    const seen = new Set()
+    const out = []
+    ;(inputRows || []).forEach(r => {
+      const key = [cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET']), cellValue(r, ['batDau','BAT_DAU']), cellValue(r, ['ketThuc','KET_THUC'])].map(x => String(x || '').trim()).join('|')
+      if (!seen.has(key)) { seen.add(key); out.push(r) }
+    })
+    return out
+  }
+  async function loadRawRowsForPrint() {
+    const params = reportParams()
+    const attempts = [
+      () => api('getBaoCaoChiTietXemTruoc', [params]),
+      () => api('getBaoCaoChiTietXemTruoc', [{ ...params, loaiBaoCao: params.loaiBaoCao, chiTiet: params.chiTiet || 'Tất cả' }]),
+      () => api('getDanhSachBaoCaoChiTiet', [params]),
+      () => api('getBaoCaoChiTietTheoKhoangNgay', [params]),
+    ]
+    for (const fn of attempts) {
+      try {
+        const r = await fn()
+        const data = normalizePreviewRows(r)
+        if (data.length) return { raw: r, rows: data }
+      } catch (e) {}
+    }
+    if (loaiBaoCao === 'Tăng ca') {
+      const r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), '', loaiTangCa])
+      return { raw: r, rows: normalizePreviewRows(r) }
+    }
+    return { raw: null, rows: [] }
+  }
   async function load() {
     if (!validateRange()) return
     setBusy(true)
-    setMsg('⏳ Đang lấy dữ liệu xem trước...')
+    setMsg(`⏳ Đang lấy dữ liệu xem trước: ${reportTitle()}...`)
     try {
-      let r
-      try {
-        // Action mới đọc trực tiếp bảng BAO_CAO_CHI_TIET, lọc đúng LOAI_BAO_CAO / CHI_TIET / ngày / bộ phận.
-        r = await api('getBaoCaoChiTietXemTruoc', [reportParams()])
-      } catch (firstError) {
-        // Giữ tương thích bản cũ: chỉ fallback cho báo cáo Tăng ca vì Apps Script cũ chỉ biết tăng ca.
-        if (loaiBaoCao !== 'Tăng ca') throw firstError
-        r = await api('getDanhSachTangCaXemTruoc', ['THEO_KHOANG_NGAY', bp, fromInputDate(tuNgay), fromInputDate(denNgay), '', loaiTangCa])
-      }
-      let data = normalizePreviewRows(r)
-      data = data.filter(row => {
-        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI'], '')
-        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], '')
-        if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || ct.startsWith('Vắng')
-        if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự') && !sameText(ct, 'Điều động sang tổ khác')
-        if (loaiBaoCao === 'Chuyển bộ phận') return sameText(ct, 'Điều động sang tổ khác')
-        if (loaiBaoCao === 'Làm ngày lễ') return sameText(loai, 'Làm ngày lễ') || sameText(ct, 'Đăng ký làm ngày lễ')
-        if (loaiBaoCao === 'Tăng ca') return sameText(loai, 'Tăng ca') || ct.startsWith('Tăng ca')
-        return true
-      })
+      const r = await loadRawRowsForPrint()
+      let data = filterRowsByReportType(r.rows)
+      if (loaiBaoCao === 'Tăng ca') data = dedupeOvertimeRows(data)
       setRows(data)
       writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
-      setMsg(r?.message || (data.length ? `✅ Đã tải đủ ${data.length} dòng ${reportTitle()}.` : 'Không có dữ liệu theo bộ lọc.'))
-    } catch (e) { setMsg(e.message || 'Không xem trước được. Cần cập nhật Apps Script đọc BAO_CAO_CHI_TIET.') }
+      setMsg(data.length ? `✅ Đã tải ${data.length} dòng ${reportTitle()}.` : `Không có dữ liệu ${reportTitle()} theo bộ lọc.`)
+    } catch (e) {
+      setRows([])
+      setMsg(`❌ Không xem trước được ${reportTitle()}: ${e.message || 'Cần kiểm tra Apps Script đọc BAO_CAO_CHI_TIET.'}`)
+    }
     finally { setBusy(false) }
   }
 
@@ -1671,25 +1731,13 @@ function PrintOvertimeScreen({ session, departments }) {
     setBusy(true)
     setMsg(`⏳ Đang tạo file Excel: ${reportTitle()}...`)
     try {
-      let data = rows
+      let data = rows.length ? rows : []
       if (!data.length) {
-        try {
-          const r = await api('getBaoCaoChiTietXemTruoc', [reportParams()])
-          data = normalizePreviewRows(r)
-        } catch (e) {
-          data = []
-        }
+        const r = await loadRawRowsForPrint()
+        data = filterRowsByReportType(r.rows)
+      } else {
+        data = filterRowsByReportType(data)
       }
-      data = (data || []).filter(row => {
-        const loai = cellValue(row, ['loaiBaoCao','LOAI_BAO_CAO','loai','LOAI'], '')
-        const ct = cellValue(row, ['chiTiet','CHI_TIET','loaiTangCa'], '')
-        if (loaiBaoCao === 'Vắng mặt') return sameText(loai, 'Báo cáo vắng') || String(ct).startsWith('Vắng')
-        if (loaiBaoCao === 'Biến động') return sameText(loai, 'Biến động nhân sự') && !sameText(ct, 'Điều động sang tổ khác')
-        if (loaiBaoCao === 'Chuyển bộ phận') return sameText(ct, 'Điều động sang tổ khác')
-        if (loaiBaoCao === 'Làm ngày lễ') return sameText(loai, 'Làm ngày lễ') || sameText(ct, 'Đăng ký làm ngày lễ')
-        if (loaiBaoCao === 'Tăng ca') return sameText(loai, 'Tăng ca') || String(ct).startsWith('Tăng ca')
-        return true
-      })
       setRows(data)
       writeJson(cacheKey, { rows: data, cachedAt: Date.now(), loaiBaoCao, loaiTangCa: showLoaiTangCa ? loaiTangCa : '' })
 
@@ -1697,13 +1745,20 @@ function PrintOvertimeScreen({ session, departments }) {
       let headers, body
       if (loaiBaoCao === 'Tăng ca') {
         headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại tăng ca','Bắt đầu','Kết thúc','Số giờ']
+        const seen = new Set()
+        const unique = []
+        data.forEach(r => {
+          const key = [cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET']), cellValue(r, ['batDau','BAT_DAU']), cellValue(r, ['ketThuc','KET_THUC'])].map(x => String(x || '').trim()).join('|')
+          if (!seen.has(key)) { seen.add(key); unique.push(r) }
+        })
+        data = unique
         body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','loaiTangCa','CHI_TIET'], loaiTangCa), cellValue(r, ['batDau','BAT_DAU']), cellValue(r, ['ketThuc','KET_THUC']), cellValue(r, ['soGio','SO_GIO'])])
       } else if (loaiBaoCao === 'Vắng mặt') {
         headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Buổi vắng','Trạng thái','Ghi chú']
         body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Vắng mặt'), cellValue(r, ['trangThai','TRANG_THAI'], 'Có phép'), cellValue(r, ['ghiChu','GHI_CHU'])])
       } else if (loaiBaoCao === 'Biến động') {
-        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại biến động','Trạng thái','Ghi chú']
-        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Biến động'), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
+        headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Loại biến động','Trạng thái','Tổ chuyển đến','Ghi chú']
+        body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['chiTiet','CHI_TIET'], 'Biến động'), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['toChuyenDen','TO_CHUYEN_DEN']), cellValue(r, ['ghiChu','GHI_CHU'])])
       } else if (loaiBaoCao === 'Làm ngày lễ') {
         headers = ['STT','Mã NV','Họ và tên','Bộ phận','Ngày','Trạng thái','Ghi chú']
         body = data.map((r, i) => [i + 1, cellValue(r, ['maNv','ma','MA_NV']), cellValue(r, ['tenNv','ten','hoTen','TEN_NV']), cellValue(r, ['boPhanGoc','boPhan','BO_PHAN_GOC'], bp), cellValue(r, ['ngay','NGAY']), cellValue(r, ['trangThai','TRANG_THAI'], 'Đã chọn'), cellValue(r, ['ghiChu','GHI_CHU'])])
@@ -1713,7 +1768,7 @@ function PrintOvertimeScreen({ session, departments }) {
       }
       downloadHtmlExcel(filename, reportTitle(), headers, body)
       setFileUrl('')
-      setMsg(data.length ? `✅ Đã tạo file Excel đúng mẫu: ${reportTitle()}.` : `✅ Đã tạo file Excel ${reportTitle()} nhưng chưa có dòng dữ liệu.`)
+      setMsg(data.length ? `✅ Đã tạo file Excel đúng mẫu: ${reportTitle()} (${data.length} dòng).` : `✅ Đã tạo file Excel ${reportTitle()} nhưng chưa có dòng dữ liệu.`)
     } catch (e) { setMsg(`❌ Chưa xuất được Excel ${reportTitle()}: ${e.message || 'Lỗi xuất file.'}`) }
     finally { setBusy(false) }
   }
